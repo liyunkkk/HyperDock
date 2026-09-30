@@ -24,13 +24,14 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install SDK packages
+      - name: Install Android SDK packages
         run: |
-          yes | sdkmanager --licenses > /dev/null 2>&1 || true
-          sdkmanager "platform-tools" "platforms;android-37"
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          SDKMANAGER=$(ls "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager | sort -V | tail -1)
+          echo "sdkmanager=$SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
+          "$SDKMANAGER" "platform-tools" "platforms;android-37" 2>&1 | tail -5
+          ls "$ANDROID_HOME/platforms" "$ANDROID_HOME/build-tools" 2>/dev/null || true
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -45,7 +46,7 @@ jobs:
           if [ -n "$KEYSTORE_BASE64" ]; then
             printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/hd-ci.jks"
             export KEYSTORE_PATH="$RUNNER_TEMP/hd-ci.jks"
-            echo "使用仓库 secrets 中的固定签名密钥"
+            echo "使用 secrets 中的固定签名密钥"
           else
             echo "::warning::未配置签名 secrets，将回退到 debug 签名"
           fi
@@ -60,8 +61,8 @@ jobs:
           OUT="HyperDock-${VERSION}-${SHA}.apk"
           cp app/build/outputs/apk/release/app-release.apk "$OUT"
           ls -l "$OUT"
-          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort | tail -1)
-          [ -n "$APKSIGNER" ] && "$APKSIGNER" verify --print-certs "$OUT" | head -4 || true
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -1)
+          if [ -n "$APKSIGNER" ]; then "$APKSIGNER" verify --print-certs "$OUT" | head -4; fi
           echo "file=$OUT" >> "$GITHUB_OUTPUT"
 
       - name: Upload artifact
