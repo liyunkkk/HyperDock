@@ -1,0 +1,87 @@
+name: Build APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install SDK packages
+        run: |
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+          sdkmanager "platform-tools" "platforms;android-37"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build release APK
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/hd-ci.jks"
+            export KEYSTORE_PATH="$RUNNER_TEMP/hd-ci.jks"
+            echo "使用仓库 secrets 中的固定签名密钥"
+          else
+            echo "::warning::未配置签名 secrets，将回退到 debug 签名"
+          fi
+          chmod +x gradlew
+          ./gradlew :app:assembleRelease --no-daemon --stacktrace
+
+      - name: Collect APK
+        id: apk
+        run: |
+          VERSION=$(grep -E '^appVersionName=' gradle.properties | cut -d= -f2)
+          SHA=$(git rev-parse --short HEAD)
+          OUT="HyperDock-${VERSION}-${SHA}.apk"
+          cp app/build/outputs/apk/release/app-release.apk "$OUT"
+          ls -l "$OUT"
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort | tail -1)
+          [ -n "$APKSIGNER" ] && "$APKSIGNER" verify --print-certs "$OUT" | head -4 || true
+          echo "file=$OUT" >> "$GITHUB_OUTPUT"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: HyperDock-${{ github.run_number }}
+          path: ${{ steps.apk.outputs.file }}
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Publish to release
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APK: ${{ steps.apk.outputs.file }}
+        run: |
+          TAG="build-${{ github.run_number }}"
+          gh release create "$TAG" "$APK" --title "自动构建 $TAG" \
+            --notes "commit ${{ github.sha }} · run ${{ github.run_number }}" || \
+          gh release upload "$TAG" "$APK" --clobber
+          gh release list --limit 100 --json tagName --jq '.[].tagName' \
+            | grep '^build-' | grep -v "^${TAG}$" \
+            | while read -r t; do gh release delete "$t" --yes --cleanup-tag || true; done
