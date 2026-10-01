@@ -24,6 +24,15 @@ internal object SidebarDockState {
     /** 「速记旁边的图标」的条目实例；未配置时为 null。 */
     @Volatile var slotItem: Any? = null
 
+    /**
+     * 侧边栏本体列表里出现过的条目类集合。
+     *
+     * 全部应用面板用的是同一个 adapter（列表里有分组条目，类更多），
+     * 只凭 adapter 无法区分，所以把「条目不多的那份列表」的类集合记下来，
+     * 之后的注入只认类集合是它子集的列表。
+     */
+    @Volatile var dockClasses: Set<Class<*>> = emptySet()
+
     /** 注入的「最近打开应用」条目（顺序即显示顺序）。 */
     @Volatile var recentItems: List<Any> = emptyList()
 
