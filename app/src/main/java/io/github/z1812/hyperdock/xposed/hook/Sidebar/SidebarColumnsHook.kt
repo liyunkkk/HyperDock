@@ -9,6 +9,7 @@ import android.view.ViewGroup
 import io.github.z1812.hyperdock.PrefKeys
 import io.github.z1812.hyperdock.xposed.ConfigManager
 import io.github.z1812.hyperdock.xposed.hook.BaseHook
+import io.github.z1812.hyperdock.xposed.hook.HdDebug
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface.PackageLoadedParam
 import java.lang.reflect.Constructor
@@ -508,7 +509,16 @@ object SidebarColumnsHook : BaseHook() {
                         return@intercept chain.proceed()
                     }
                     val position = chain.args.firstOrNull() as? Int ?: return@intercept chain.proceed()
-                    SidebarDockState.spanFor(position, columnsNow)
+                    val span = SidebarDockState.spanFor(position, columnsNow)
+                    // 只记前几格（最近应用 + 分割线那一段），避免刷屏。
+                    if (position <= SidebarDockState.recentItems.size + 2) {
+                        HdDebug.log(
+                            "Columns",
+                            "span pos=$position columns=$columnsNow span=$span " +
+                                "divider=${SidebarDockState.isDividerPosition(position)}",
+                        )
+                    }
+                    span
                 }
             }.onFailure { logWarn(module, "span lookup hook failed: ${it.message}") }
             spanLookupInstalled = true

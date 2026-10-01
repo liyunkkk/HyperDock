@@ -925,46 +925,78 @@ object SidebarDockSlotHook : BaseHook() {
         itemView.visibility = View.VISIBLE
         itemView.findViewById<View>(iconResId)?.visibility = View.GONE
         itemView.findViewById<View>(placeholderResId)?.visibility = View.GONE
-        // 宿主当前版本的条目布局里没有 divider 这个 view（列表本身只有应用条目），
-        // 所以这里直接用 foreground 画一条横线：不改布局、不受 ViewHolder 复用影响。
-        val thickness = (itemView.resources.displayMetrics.density * 1.5f).toInt().coerceAtLeast(2)
-        itemView.foreground = DividerLineDrawable(thickness)
-        val hostDivider = if (dividerResId != 0) itemView.findViewById<View>(dividerResId) else null
+        val divider = if (dividerResId != 0) itemView.findViewById<View>(dividerResId) else null
+        if (divider == null) {
+            // 兜底：宿主布局里没有分割线 view 时自己画一条（当前版本实测有，走不到这里）。
+            itemView.foreground = LiquidGlassLineDrawable(lineHeight(itemView))
+            HdDebug.log(TAG, "divider bind: 无宿主 view，用 foreground 自绘")
+            return
+        }
+        divider.visibility = View.VISIBLE
+        val density = itemView.resources.displayMetrics.density
+        val inset = if (paddingPx > 0) paddingPx else (12 * density).toInt()
+        val height = lineHeight(itemView)
+        val params = divider.layoutParams as? ViewGroup.MarginLayoutParams
+        if (params != null) {
+            params.width = ViewGroup.LayoutParams.MATCH_PARENT
+            params.height = height
+            params.leftMargin = inset
+            params.rightMargin = inset
+            divider.layoutParams = params
+        } else {
+            divider.layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, height)
+        }
+        divider.background = LiquidGlassLineDrawable(height)
         HdDebug.log(
             TAG,
-            "divider bind: hostDivider=${hostDivider != null} thickness=$thickness " +
-                "width=${itemView.width}",
+            "divider bind: inset=$inset height=$height cellWidth=" + itemView.width +
+                " dividerWidth=" + divider.width,
         )
-        if (hostDivider != null) {
-            hostDivider.visibility = View.VISIBLE
-            val parent = itemView.parent as? View
-            if (parent != null && parent.width > 0) {
-                val params = hostDivider.layoutParams
-                if (params != null) {
-                    params.width = (parent.width - paddingPx * 2).coerceAtLeast(0)
-                    hostDivider.layoutParams = params
-                }
-            }
-        }
     }
 
-    /** 一条居中的中性半透明横线，用作「最近应用 / 常用应用」之间的分隔。 */
-    private class DividerLineDrawable(private val thickness: Int) : Drawable() {
+    private fun lineHeight(view: View): Int {
+        val density = view.resources.displayMetrics.density
+        return (3 * density).toInt().coerceAtLeast(4)
+    }
 
-        private val paint = android.graphics.Paint().apply {
-            color = android.graphics.Color.argb(70, 128, 128, 128)
-        }
+    /**
+     * 液态玻璃质感的分隔线：外层一圈很淡的柔光 + 中间一条更亮的细芯，
+     * 叠在侧边栏的半透明面板上会有玻璃条的感觉（宿主窗口里没法真做背景模糊）。
+     */
+    private class LiquidGlassLineDrawable(private val height: Int) : Drawable() {
+
+        private val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+        private val rect = android.graphics.RectF()
 
         override fun draw(canvas: android.graphics.Canvas) {
             val bounds = bounds
+            if (bounds.isEmpty) return
             val centerY = (bounds.top + bounds.bottom) / 2f
-            canvas.drawRect(
-                bounds.left.toFloat(),
-                centerY - thickness / 2f,
-                bounds.right.toFloat(),
-                centerY + thickness / 2f,
-                paint,
+            val top = centerY - height / 2f
+            val bottom = top + height
+            val radius = height / 2f
+
+            // 外层柔光
+            paint.shader = android.graphics.LinearGradient(
+                0f, top, 0f, bottom,
+                intArrayOf(0x00FFFFFF, 0x3DFFFFFF, 0x00FFFFFF),
+                floatArrayOf(0f, 0.5f, 1f),
+                android.graphics.Shader.TileMode.CLAMP,
             )
+            rect.set(bounds.left.toFloat(), top, bounds.right.toFloat(), bottom)
+            canvas.drawRoundRect(rect, radius, radius, paint)
+
+            // 中间亮芯
+            paint.shader = null
+            paint.color = 0x5CFFFFFF
+            val core = (height / 3f).coerceAtLeast(1f)
+            rect.set(
+                bounds.left.toFloat(),
+                centerY - core / 2f,
+                bounds.right.toFloat(),
+                centerY + core / 2f,
+            )
+            canvas.drawRoundRect(rect, core / 2f, core / 2f, paint)
         }
 
         override fun setAlpha(alpha: Int) {
