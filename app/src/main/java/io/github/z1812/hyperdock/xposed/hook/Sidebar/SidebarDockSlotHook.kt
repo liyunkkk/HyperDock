@@ -920,14 +920,58 @@ object SidebarDockSlotHook : BaseHook() {
         itemView.visibility = View.VISIBLE
         itemView.findViewById<View>(iconResId)?.visibility = View.GONE
         itemView.findViewById<View>(placeholderResId)?.visibility = View.GONE
-        val divider = itemView.findViewById<View>(dividerResId) ?: return
-        divider.visibility = View.VISIBLE
-        val parent = itemView.parent as? View
-        if (parent != null && parent.width > 0) {
-            val params = divider.layoutParams ?: return
-            params.width = (parent.width - paddingPx * 2).coerceAtLeast(0)
-            divider.layoutParams = params
+        // 宿主当前版本的条目布局里没有 divider 这个 view（列表本身只有应用条目），
+        // 所以这里直接用 foreground 画一条横线：不改布局、不受 ViewHolder 复用影响。
+        val thickness = (itemView.resources.displayMetrics.density * 1.5f).toInt().coerceAtLeast(2)
+        itemView.foreground = DividerLineDrawable(thickness)
+        val hostDivider = if (dividerResId != 0) itemView.findViewById<View>(dividerResId) else null
+        HdDebug.log(
+            TAG,
+            "divider bind: hostDivider=${hostDivider != null} thickness=$thickness " +
+                "width=${itemView.width}",
+        )
+        if (hostDivider != null) {
+            hostDivider.visibility = View.VISIBLE
+            val parent = itemView.parent as? View
+            if (parent != null && parent.width > 0) {
+                val params = hostDivider.layoutParams
+                if (params != null) {
+                    params.width = (parent.width - paddingPx * 2).coerceAtLeast(0)
+                    hostDivider.layoutParams = params
+                }
+            }
         }
+    }
+
+    /** 一条居中的中性半透明横线，用作「最近应用 / 常用应用」之间的分隔。 */
+    private class DividerLineDrawable(private val thickness: Int) : Drawable() {
+
+        private val paint = android.graphics.Paint().apply {
+            color = android.graphics.Color.argb(70, 128, 128, 128)
+        }
+
+        override fun draw(canvas: android.graphics.Canvas) {
+            val bounds = bounds
+            val centerY = (bounds.top + bounds.bottom) / 2f
+            canvas.drawRect(
+                bounds.left.toFloat(),
+                centerY - thickness / 2f,
+                bounds.right.toFloat(),
+                centerY + thickness / 2f,
+                paint,
+            )
+        }
+
+        override fun setAlpha(alpha: Int) {
+            paint.alpha = alpha
+        }
+
+        override fun setColorFilter(colorFilter: android.graphics.ColorFilter?) {
+            paint.colorFilter = colorFilter
+        }
+
+        @Deprecated("Deprecated in Java")
+        override fun getOpacity(): Int = android.graphics.PixelFormat.TRANSLUCENT
     }
 
     /** 主线程之外拿不到 Activity 时的应用上下文。 */

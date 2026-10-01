@@ -46,10 +46,13 @@ internal object SidebarDockState {
      * 因此分割线的位置是确定的：没槽位时 index 1，有槽位时 index 2。
      */
     fun isDividerPosition(position: Int): Boolean {
+        // 先认我们注入的那条分割线：宿主当前版本的侧边栏列表里没有分割线条目，
+        // dividerClass 一直是 null，不能让它把这条也挡掉（否则分割线只占一格、
+        // 看起来就是一个空位）。
+        val extra = recentDivider
+        if (extra != null && displayList.getOrNull(position) === extra) return true
         if (dividerClass == null) return false
-        if (position == dividerIndex()) return true
-        val extra = recentDivider ?: return false
-        return displayList.getOrNull(position) === extra
+        return position == dividerIndex()
     }
 
     /**
