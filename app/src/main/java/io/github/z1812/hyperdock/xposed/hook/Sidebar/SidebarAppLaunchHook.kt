@@ -42,6 +42,7 @@ object SidebarAppLaunchHook : BaseHook() {
     @Volatile private var smallWindowLaunch: Method? = null
     @Volatile private var menuHooked = false
     @Volatile private var launcherInstance: Any? = null
+    @Volatile private var launcherClass: Class<*>? = null
     @Volatile private var freeformLaunch: Method? = null
 
     /** 菜单项自己走小窗时，别被「默认全屏」那条拦截又改成全屏。 */
@@ -90,9 +91,8 @@ object SidebarAppLaunchHook : BaseHook() {
         }
         freeform.isAccessible = true
         freeformLaunch = freeform
-        launcherInstance = runCatching {
-            launcher.getDeclaredMethod("y").invoke(null)
-        }.getOrNull()
+        launcherClass = launcher
+        launcherInstance = resolveLauncher()
         log(module, "freeform=${freeform.declaringClass.simpleName}.${freeform.name}")
         module.hook(freeform).intercept { chain ->
             if (bypassFullscreen) return@intercept chain.proceed()
@@ -210,11 +210,13 @@ object SidebarAppLaunchHook : BaseHook() {
                 // 宿主的小窗入口就是 DockAppAnimLauncher.C（普通点击走的那条）；
                 // e0.Z 依赖 MiuiMultiWindowUtils 反射，拿不到 ActivityOptions 会静默什么都不做。
                 val icon = firstImageView(itemView)
+                val target = launcherInstance ?: resolveLauncher()
                 val launched = runCatching {
                     bypassFullscreen = true
-                    freeformLaunch?.invoke(launcherInstance, icon, intent, pkg, uid, null)
+                    freeformLaunch?.invoke(target, icon, intent, pkg, uid, null)
                     true
-                }.getOrDefault(false)
+                }.onFailure { HdDebug.log(TAG, "freeform invoke failed: $it") }
+                    .getOrDefault(false)
                 bypassFullscreen = false
                 HdDebug.log(TAG, "menu click: freeform launch=$launched pkg=$pkg icon=${icon != null}")
                 null
@@ -258,6 +260,26 @@ object SidebarAppLaunchHook : BaseHook() {
             fullscreenLaunch?.invoke(null, context, intent, uid)
             true
         }.getOrDefault(false)
+    }
+
+    /**
+     * 取 DockAppAnimLauncher 实例：先试静态工厂 `y()`，再退到同类型的静态字段。
+     * 之前直接 `y()` 拿不到时传了 null，反射调用就 NPE（日志里 launch=false）。
+     */
+    private fun resolveLauncher(): Any? {
+        launcherInstance?.let { return it }
+        val type = launcherClass ?: return null
+        val fromFactory = runCatching { type.getDeclaredMethod("y").invoke(null) }.getOrNull()
+        if (fromFactory != null) {
+            launcherInstance = fromFactory
+            return fromFactory
+        }
+        val fromField = type.declaredFields.firstOrNull { field ->
+            java.lang.reflect.Modifier.isStatic(field.modifiers) && type.isAssignableFrom(field.type)
+        }?.let { field -> runCatching { field.isAccessible = true; field.get(null) }.getOrNull() }
+        if (fromField != null) launcherInstance = fromField
+        HdDebug.log(TAG, "resolveLauncher factory=$fromFactory field=$fromField")
+        return fromField
     }
 
     /** 「小窗」文案优先用模块自己的字符串资源（宿主没有单独的小窗文案）。 */

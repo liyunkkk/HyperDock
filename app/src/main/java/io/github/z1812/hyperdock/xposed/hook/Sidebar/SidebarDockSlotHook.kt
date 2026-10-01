@@ -455,8 +455,8 @@ object SidebarDockSlotHook : BaseHook() {
             } else {
                 HdDebug.log(
                     TAG,
-                    "learn 未采纳: a=${a.simpleName} b=${b.simpleName} c=${c.simpleName} " +
-                        "slotType=${slotType?.simpleName} size=${list.size}",
+                    "learn 未采纳: a=${a.name} b=${b.name} c=${c.name} " +
+                        "slotType=${slotType?.name} size=${list.size}",
                 )
             }
         }
@@ -788,26 +788,19 @@ object SidebarDockSlotHook : BaseHook() {
             clearRecent()
             return list
         }
-        var dividerClass = SidebarDockState.dividerClass
-        if (dividerClass == null) {
-            // 原生顺序恒为 [速记][分割线][应用…]，按位置兜底并回填状态（占格计算要用）。
-            if (list.size < 2) {
-                HdDebug.log(TAG, "recent: 列表太短 size=${list.size}")
-                return list
+        // 侧边栏这份列表在宿主当前版本里只有应用条目（日志实测 a=b=c 同类），
+        // 没有独立的「速记/分割线」条目：所以只有 learn() 真的学到分割线类时才按它定位，
+        // 否则整组插到列表最前面（= 常用应用上方）。
+        var insertAt = 0
+        var locatedBy = "top"
+        val learnedDivider = SidebarDockState.dividerClass
+        if (learnedDivider != null) {
+            val index = list.indexOfFirst { it.javaClass == learnedDivider }
+            val count = list.count { it.javaClass == learnedDivider }
+            if (index >= 0 && count == 1) {
+                insertAt = index + 1
+                locatedBy = "divider@$index"
             }
-            dividerClass = list[1].javaClass
-            SidebarDockState.shorthandClass = SidebarDockState.shorthandClass ?: list[0].javaClass
-            SidebarDockState.dividerClass = dividerClass
-            HdDebug.log(
-                TAG,
-                "recent: 按位置兜底 shorthand=${list[0].javaClass.simpleName} " +
-                    "divider=${dividerClass.simpleName} size=${list.size}",
-            )
-        }
-        val dividerIndex = list.indexOfFirst { it.javaClass == dividerClass }
-        if (dividerIndex < 0) {
-            HdDebug.log(TAG, "recent: 列表里没有分割线")
-            return list
         }
         val context = appContext()
         if (context == null) {
@@ -836,11 +829,11 @@ object SidebarDockSlotHook : BaseHook() {
         SidebarDockState.recentDivider = divider
         SidebarDockState.recentItems = items
         val out = ArrayList<Any>(list.size + items.size + 1)
-        out.addAll(list.subList(0, dividerIndex + 1))
+        out.addAll(list.subList(0, insertAt))
         out.addAll(items)
         out.add(divider)
-        out.addAll(list.subList(dividerIndex + 1, list.size))
-        log(module, "recent injected=${items.size} at=${dividerIndex + 1} size=${out.size}")
+        out.addAll(list.subList(insertAt, list.size))
+        log(module, "recent injected=${items.size} at=$insertAt by=$locatedBy size=${out.size}")
         return out
     }
 
