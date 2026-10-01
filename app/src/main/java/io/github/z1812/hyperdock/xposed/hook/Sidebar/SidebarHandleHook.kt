@@ -2,7 +2,13 @@ package io.github.z1812.hyperdock.xposed.hook.Sidebar
 
 import android.app.Application
 import android.content.Context
+import android.content.res.Resources
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.RectF
 import android.graphics.drawable.Drawable
+import android.view.Gravity
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -75,6 +81,9 @@ object SidebarHandleHook : BaseHook() {
 
     /** wrapper 实例 -> 当前是否处于「原生不处理、由我们转发」的手势中。 */
     private val forwarding = Collections.synchronizedMap(WeakHashMap<Any, Boolean>())
+
+    /** wrapper 实例 -> 自绘黑条（触摸面积放大时用，长度 = 原生线长 × 倍率）。 */
+    private val ownBars = Collections.synchronizedMap(WeakHashMap<Any, Drawable>())
 
     /** wrapper 实例 -> 小横条原始 drawable。 */
     private val handleDrawables = Collections.synchronizedMap(WeakHashMap<Any, Drawable>())
@@ -232,7 +241,20 @@ object SidebarHandleHook : BaseHook() {
             installTouchForwarding(module, wrapper, cover, handle)
         }
 
-        // 小横条可见性：开关打开时先显示并起计时；关掉时恢复常显。
+        // 可见黑条：倍率 > 1 时自绘一条（长度 = 原生线长 × 倍率，窗口放得下、不会被裁），
+        // 倍率为原生时把宿主 drawable 还回去、不画自己的。
+        val scale = scaleFactor()
+        if (cover != null && handle != null) {
+            if (scale > 1) {
+                ownBars[wrapper] = buildBarDrawable(cover, scale)
+                if (handle is ImageView) handle.setImageDrawable(null)
+            } else {
+                ownBars.remove(wrapper)
+                cover.background = null
+            }
+        }
+
+        // 可见性：开关打开时先显示并起计时；关掉时恢复常显。
         if (handle != null) {
             val idleHide = idleHideEnabled()
             showHandle(wrapper, handle, resetTimer = idleHide)
@@ -250,11 +272,20 @@ object SidebarHandleHook : BaseHook() {
     private fun showHandle(wrapper: Any, handle: View, resetTimer: Boolean) {
         mainHandler.post {
             runCatching {
-                val saved = handleDrawables[wrapper]
-                val image = handle as? ImageView
-                if (image != null && saved != null && image.drawable !== saved) {
-                    image.setImageDrawable(saved)
-                    logMsg("handle bar shown")
+                val own = ownBars[wrapper]
+                if (own != null) {
+                    val cover = coverAccessor?.invoke(wrapper) as? View
+                    if (cover != null && cover.background !== own) {
+                        cover.background = own
+                        logMsg("own bar shown")
+                    }
+                } else {
+                    val saved = handleDrawables[wrapper]
+                    val image = handle as? ImageView
+                    if (image != null && saved != null && image.drawable !== saved) {
+                        image.setImageDrawable(saved)
+                        logMsg("native bar shown")
+                    }
                 }
             }
             if (resetTimer) resetIdleTimer(wrapper)
@@ -287,6 +318,15 @@ object SidebarHandleHook : BaseHook() {
         idleTasks.remove(wrapper)
         if (!idleHideEnabled()) return
         val handle = runCatching { handleAccessor?.invoke(wrapper) as? View }.getOrNull() ?: return
+        val own = ownBars[wrapper]
+        if (own != null) {
+            val cover = coverAccessor?.invoke(wrapper) as? View
+            if (cover != null && cover.background === own) {
+                cover.background = null
+                logMsg("own bar hidden after ${IDLE_HIDE_MS}ms idle")
+            }
+            return
+        }
         val image = handle as? ImageView ?: return
         if (image.drawable != null) {
             image.setImageDrawable(null)
@@ -328,6 +368,65 @@ object SidebarHandleHook : BaseHook() {
         }
         touchWrapped[wrapper] = true
         log(module, "cover touch forwarding installed")
+    }
+
+    /**
+     * 自绘黑条：宿主原生黑条是 3dp × 66dp 的竖线，画在 32dp × 112dp 的视图里、
+     * 面板窗口只有 112dp 高，所以拉伸原生视图会被窗口裁掉。这里改成在 cover view
+     * （窗口高度 = 触摸区域，我们自己在放大）的 background 上画一条同样粗细、
+     * 长度 = 原生线长 × 倍率的圆头竖线：贴着屏幕边、顶端与原声黑条对齐、向下生长，
+     * 因此整条都在窗口内，不会被裁。
+     */
+    private fun buildBarDrawable(cover: View, scale: Int): Drawable {
+        val res = cover.resources
+        val barWidth = dimen(res, "sidebar_line_width_vertical", 3)
+        val lineLength = dimen(res, "sidebar_line_height_vertical", 66)
+        val margin = dimen(res, "sidebar_line_margin_start", 6)
+        val params = cover.layoutParams as? WindowManager.LayoutParams
+        val isLeft = params != null && (params.gravity and Gravity.LEFT) != 0
+        // 原生线的顶端：视图高 112dp、线 66dp，居中 → (112-66)/2 = 23dp
+        val nativeViewHeight = dimen(res, "sidebar_height_vertical", 112)
+        val top = ((nativeViewHeight - lineLength) / 2).coerceAtLeast(0)
+        return BarDrawable(
+            barWidth = barWidth,
+            margin = margin,
+            top = top,
+            length = lineLength * scale,
+            isLeft = isLeft,
+        )
+    }
+
+    private fun dimen(res: Resources, name: String, fallbackDp: Int): Int {
+        val id = res.getIdentifier(name, "dimen", "com.miui.securitycenter")
+        val value = if (id != 0) runCatching { res.getDimensionPixelSize(id) }.getOrDefault(0) else 0
+        return if (value > 0) value else (fallbackDp * res.displayMetrics.density).toInt()
+    }
+
+    /** 中性半透明灰：浅底深底都看得见（原生会按背景采样自适应，这里做不到）。 */
+    private class BarDrawable(
+        private val barWidth: Int,
+        private val margin: Int,
+        private val top: Int,
+        private val length: Int,
+        private val isLeft: Boolean,
+    ) : Drawable() {
+
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(140, 128, 128, 128) }
+        private val rect = RectF()
+
+        override fun draw(canvas: Canvas) {
+            val left = if (isLeft) margin.toFloat() else (bounds.width() - margin - barWidth).toFloat()
+            rect.set(left, top.toFloat(), left + barWidth, (top + length).toFloat())
+            val radius = barWidth / 2f
+            canvas.drawRoundRect(rect, radius, radius, paint)
+        }
+
+        override fun setAlpha(alpha: Int) { paint.alpha = alpha }
+
+        override fun setColorFilter(colorFilter: android.graphics.ColorFilter?) { paint.colorFilter = colorFilter }
+
+        @Deprecated("Deprecated in Java")
+        override fun getOpacity(): Int = android.graphics.PixelFormat.TRANSLUCENT
     }
 
     /** 主线程任务里没有 module 参数时的日志出口。 */
