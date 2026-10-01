@@ -319,8 +319,21 @@ object SidebarDockSlotHook : BaseHook() {
         submit.isAccessible = true
         runCatching {
             module.hook(submit).intercept { chain ->
-                // 同类的其它 adapter 实例（非侧边栏）必须放行。
-                if (chain.thisObject !== adapterInstance) return@intercept chain.proceed()
+                // 同类的其它 adapter 实例（全部应用面板）不注入，但记一笔结构，
+                // 用来定位「推荐应用」那一组是怎么进列表的。
+                if (chain.thisObject !== adapterInstance) {
+                    if (chain.thisObject?.javaClass == adapterInstance?.javaClass) {
+                        val other = chain.args.getOrNull(0) as? List<Any>
+                        if (other != null) {
+                            HdDebug.log(
+                                TAG,
+                                "panel submit n=" + other.size + " [" +
+                                    other.take(24).joinToString(",") { describe(it) } + "]",
+                            )
+                        }
+                    }
+                    return@intercept chain.proceed()
+                }
                 val raw = chain.args.getOrNull(0) as? List<Any>
                     ?: return@intercept chain.proceed()
                 val flag = chain.args.getOrNull(1) ?: false
@@ -365,6 +378,25 @@ object SidebarDockSlotHook : BaseHook() {
                     .getOrElse { chain.proceed() }
             }
         }.onFailure { logWarn(module, "dock submitList hook failed: ${it.message}") }
+
+        // 面板的列表可能是靠适配器上的「加一条/删一条」增量维护的，这条也探一下。
+        runCatching {
+            type.declaredMethods
+                .filter {
+                    it.parameterCount == 1 && it.returnType == Void.TYPE &&
+                        !it.parameterTypes[0].isPrimitive
+                }
+                .forEach { method ->
+                    method.isAccessible = true
+                    module.hook(method).intercept { chain ->
+                        val item = chain.args.getOrNull(0)
+                        if (item != null && !item.javaClass.name.contains("Proxy")) {
+                            HdDebug.log(TAG, "adapter op " + method.name + " item=" + describe(item))
+                        }
+                        chain.proceed()
+                    }
+                }
+        }.onFailure { logWarn(module, "adapter op probe failed: ${it.message}") }
 
         bind?.let { method ->
             method.isAccessible = true
@@ -1234,6 +1266,17 @@ object SidebarDockSlotHook : BaseHook() {
                 source
             }
         }
+    }
+
+    /** 条目的「类名:包名」，用于诊断日志。 */
+    private fun describe(item: Any?): String {
+        val target = item ?: return "null"
+        val pkg = runCatching {
+            val model = target.javaClass.getMethod("g").invoke(target)
+            val field = model.javaClass.getDeclaredField("b").apply { isAccessible = true }
+            field.get(model) as? String
+        }.getOrNull()
+        return if (pkg.isNullOrBlank()) target.javaClass.simpleName else target.javaClass.simpleName + ":" + pkg
     }
 
     /** 侧边栏网格（RecyclerView）。 */
