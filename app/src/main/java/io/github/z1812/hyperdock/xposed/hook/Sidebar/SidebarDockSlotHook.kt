@@ -100,6 +100,7 @@ object SidebarDockSlotHook : BaseHook() {
             return
         }
         hookDockHeightList(module, loader)
+        hookDetachedSmoothScroll(module, loader)
         // 注意：**不要**再往宿主自己的数据列表（z7.u.f()）里塞条目。
         // 宿主的「刷新列表」路径会遍历它，塞进去会让它在侧边栏已关闭时走
         // smoothScrollToPosition 分支 → RecyclerView 已 detach → NPE 闪退
@@ -1129,6 +1130,44 @@ object SidebarDockSlotHook : BaseHook() {
             val list = result as? List<Any> ?: return@intercept result
             appendInjected(module, list, "height")
         }
+    }
+
+    /**
+     * 兜住宿主的 NPE：侧边栏已关闭（网格已 detach）时，宿主在「添加/删除常用应用」触发
+     * 的刷新里仍会去 `smoothScrollToPosition`，此时 LayoutManager 的 mRecyclerView 为 null，
+     * `RecyclerView$y.start` 读 `recyclerView.mViewFlinger` 直接 NPE 闪退
+     * （dropbox：y.q → r0.d → p0.z ← AllAppsEventBus）。这里在 startSmoothScroll 入口
+     * 判断布局管理器有没有挂在 RecyclerView 上，没有就跳过——反正对已 detach 的列表滚动也没意义。
+     */
+    private fun hookDetachedSmoothScroll(module: XposedModule, loader: ClassLoader) {
+        val lmClass = runCatching {
+            Class.forName("androidx.recyclerview.widget.RecyclerView\$n", false, loader)
+        }.getOrNull()
+        val method = lmClass?.declaredMethods?.firstOrNull {
+            it.name == "startSmoothScroll" && it.parameterCount == 1
+        }
+        if (method == null) {
+            HdDebug.log(TAG, "startSmoothScroll not found; crash guard disabled")
+            return
+        }
+        method.isAccessible = true
+        module.hook(method).intercept { chain ->
+            val target = chain.thisObject
+            val attached = runCatching {
+                val field = generateSequence(target.javaClass as Class<*>?) { it.superclass }
+                    .flatMap { runCatching { it.declaredFields.asSequence() }.getOrDefault(emptySequence()) }
+                    .firstOrNull { it.name == "mRecyclerView" }
+                field?.isAccessible = true
+                field?.get(target)
+            }.getOrNull()
+            if (attached == null || chain.args.firstOrNull() == null) {
+                HdDebug.log(TAG, "skip smooth scroll on detached layout manager")
+                null
+            } else {
+                chain.proceed()
+            }
+        }
+        HdDebug.log(TAG, "detached smooth scroll guard installed")
     }
 
     /** 侧边栏网格（RecyclerView）。 */
