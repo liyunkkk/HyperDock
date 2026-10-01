@@ -100,6 +100,7 @@ object SidebarDockSlotHook : BaseHook() {
             return
         }
         hookDockHeightList(module, loader)
+        hookDockModelList(module, loader)
         turboClass = runCatching { Class.forName(TURBO_LAYOUT_CLASS, false, loader) }.getOrNull()
         if (turboClass == null) {
             logWarn(module, "TurboLayout unavailable; dock slot disabled")
@@ -1046,16 +1047,51 @@ object SidebarDockSlotHook : BaseHook() {
         module.hook(method).intercept { chain ->
             val result = chain.proceed()
             val list = result as? List<Any> ?: return@intercept result
-            val extras = ArrayList<Any>(SidebarDockState.recentItems.size + 1)
-            extras.addAll(SidebarDockState.recentItems)
-            SidebarDockState.recentDivider?.let { extras.add(it) }
-            if (extras.isEmpty()) return@intercept result
-            val out = ArrayList<Any>(list.size + extras.size)
-            out.addAll(list)
-            out.addAll(extras)
-            HdDebug.log(TAG, "height list: " + list.size + " → " + out.size)
-            out
+            appendInjected(module, list, "height")
         }
+    }
+
+    /**
+     * 宿主自己的侧边栏列表来自 `z7.u` 的同步方法（`f()`，`p0.G()` 里日志
+     * `NewDock updateDockModelList data size` 用的就是它）。只在 adapter 层注入的话，
+     * 宿主第一次布局仍按它自己那份数据算尺寸，要等重新布局才对——表现就是
+     * 「第一次滑出错位，打开全部面板返回后正常」。所以这里把注入的条目也补进宿主列表。
+     */
+    private fun hookDockModelList(module: XposedModule, loader: ClassLoader) {
+        val heightMethod = findMethodByString(loader, HEIGHT_LIST_LOG)
+        if (heightMethod == null) {
+            HdDebug.log(TAG, "model list owner not found")
+            return
+        }
+        val owner = heightMethod.declaringClass
+        val candidates = owner.declaredMethods.filter { method ->
+            method.parameterCount == 0 &&
+                List::class.java.isAssignableFrom(method.returnType) &&
+                java.lang.reflect.Modifier.isSynchronized(method.modifiers)
+        }
+        HdDebug.log(TAG, "model list owner=" + owner.simpleName + " candidates=" + candidates.joinToString { it.name })
+        candidates.forEach { method ->
+            method.isAccessible = true
+            module.hook(method).intercept { chain ->
+                val result = chain.proceed()
+                val list = result as? List<Any> ?: return@intercept result
+                appendInjected(module, list, method.name)
+            }
+        }
+    }
+
+    /** 把注入的最近应用/分割线补进宿主返回的列表（已经在里面就不重复加）。 */
+    private fun appendInjected(module: XposedModule, list: List<Any>, from: String): List<Any> {
+        val extras = ArrayList<Any>(SidebarDockState.recentItems.size + 1)
+        extras.addAll(SidebarDockState.recentItems)
+        SidebarDockState.recentDivider?.let { extras.add(it) }
+        if (extras.isEmpty()) return list
+        if (extras.any { extra -> list.any { it === extra } }) return list
+        val out = ArrayList<Any>(list.size + extras.size)
+        out.addAll(list)
+        out.addAll(extras)
+        HdDebug.log(TAG, "model list(" + from + "): " + list.size + " → " + out.size)
+        return out
     }
 
     private fun isUiProcess(packageName: String, processName: String): Boolean {
