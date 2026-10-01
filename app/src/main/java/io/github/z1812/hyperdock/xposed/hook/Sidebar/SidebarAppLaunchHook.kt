@@ -10,6 +10,7 @@ import io.github.libxposed.api.XposedModuleInterface.PackageLoadedParam
 import io.github.z1812.hyperdock.PrefKeys
 import io.github.z1812.hyperdock.xposed.ConfigManager
 import io.github.z1812.hyperdock.xposed.hook.BaseHook
+import io.github.z1812.hyperdock.xposed.hook.HdDebug
 import java.lang.reflect.Method
 
 /**
@@ -63,6 +64,7 @@ object SidebarAppLaunchHook : BaseHook() {
                 method.parameterTypes[0] == Context::class.java &&
                 method.parameterTypes[1] == Intent::class.java
         }
+        HdDebug.log(TAG, "onInit fullscreen=${fullscreenLaunch?.name} smallWindow=${smallWindowLaunch?.name}")
         if (fullscreenLaunch == null || smallWindowLaunch == null) {
             logWarn(module, "launch helpers not found; open-mode switch disabled")
             return
@@ -89,6 +91,7 @@ object SidebarAppLaunchHook : BaseHook() {
             val intent = args.getOrNull(1) as? Intent
             val uid = args.getOrNull(3) as? Int ?: -1
             val started = launchFullscreen(icon?.context, intent, uid)
+            HdDebug.log(TAG, "click→fullscreen=$started pkg=${intent?.component?.packageName}")
             if (started) null else chain.proceed()
         }
 
@@ -113,63 +116,105 @@ object SidebarAppLaunchHook : BaseHook() {
             }
     }
 
-    /** 菜单第一项（全屏）→ 文案改「小窗」、点击改走小窗启动。 */
+    /**
+     * 菜单第一项（全屏）→ 文案改「小窗」、点击改走小窗启动。
+     *
+     * 宿主实现细节（决定了 hook 方式）：
+     * - 文案：`a8.m.e(holder)` 里 `textView.setText(this.d)`，d 是**字符串资源 id**，
+     *   不走 `j(context)`，所以只能等 bind 完再把 TextView 的文字覆盖掉；
+     * - 点击：`a8.f.c(holder)` 覆写基类，最终调 `DockAppAnimLauncher.H(...)`（全屏）；
+     * - `h()`（Intent）、`k()`（uid）声明在父类 `a8.m` 上，取方法要沿着继承链找。
+     */
     private fun adoptMenuItems(module: XposedModule, menu: Any) {
         val list = menu.javaClass.declaredFields.asSequence()
             .filter { List::class.java.isAssignableFrom(it.type) }
             .mapNotNull { field ->
                 runCatching { field.isAccessible = true; field.get(menu) as? List<*> }.getOrNull()
             }
-            .firstOrNull { it.isNotEmpty() } ?: return
+            .firstOrNull { it.isNotEmpty() }
+        if (list == null) {
+            HdDebug.log(TAG, "adopt: menu item list not found")
+            return
+        }
         val fullscreenItem = list.firstOrNull() ?: return
         val itemClass = fullscreenItem.javaClass
-        // 1 参方法只有两个：c(holder) 是点击、j(Context) 是文案。
-        val click = itemClass.declaredMethods.firstOrNull { method ->
-            method.parameterCount == 1 &&
-                method.parameterTypes[0] != Context::class.java &&
-                !method.parameterTypes[0].isPrimitive
+        val hierarchy = generateSequence(itemClass as Class<*>?) { it.superclass }.toList()
+
+        fun find(condition: (Method) -> Boolean): Method? =
+            hierarchy.asSequence()
+                .flatMap { runCatching { it.declaredMethods.asSequence() }.getOrDefault(emptySequence()) }
+                .firstOrNull(condition)
+
+        val click = find { method ->
+            method.parameterCount == 1 && method.returnType == Void.TYPE &&
+                method.parameterTypes[0] != Context::class.java && !method.parameterTypes[0].isPrimitive
         }
-        val label = itemClass.declaredMethods.firstOrNull { method ->
-            method.parameterCount == 1 && method.parameterTypes[0] == Context::class.java &&
-                method.returnType == String::class.java
+        val bind = hierarchy.asSequence()
+            .flatMap { runCatching { it.declaredMethods.asSequence() }.getOrDefault(emptySequence()) }
+            .firstOrNull { method ->
+                method.name == "e" && method.parameterCount == 1 && method.returnType == Void.TYPE
+            }
+        val intentGetter = find { it.parameterCount == 0 && it.returnType == Intent::class.java }
+        val uidGetter = find {
+            it.parameterCount == 0 && it.returnType == Integer.TYPE && it.name.length <= 2
         }
-        val intentGetter = itemClass.declaredMethods.firstOrNull { method ->
-            method.parameterCount == 0 && method.returnType == Intent::class.java
-        }
-        val uidGetter = itemClass.declaredMethods.firstOrNull { method ->
-            method.parameterCount == 0 && method.returnType == Integer.TYPE && method.name.length <= 2
-        }
-        if (click == null || label == null) {
-            logWarn(module, "menu item structure unexpected: click=$click label=$label")
+        if (click == null) {
+            HdDebug.log(TAG, "adopt: click method not found on ${itemClass.name}")
             return
         }
         click.isAccessible = true
-        label.isAccessible = true
         menuHooked = true
-        log(module, "menu item=${itemClass.name} click=${click.name} label=${label.name}")
+        HdDebug.log(
+            TAG,
+            "adopt item=${itemClass.name} click=${click.name} bind=${bind?.name} " +
+                "intent=${intentGetter?.name} uid=${uidGetter?.name}",
+        )
 
-        module.hook(label).intercept { chain ->
-            if (!defaultFullscreen()) return@intercept chain.proceed()
-            val context = chain.args.getOrNull(0) as? Context
-            if (context == null) chain.proceed() else smallWindowLabel(context)
+        if (bind != null) {
+            bind.isAccessible = true
+            module.hook(bind).intercept { chain ->
+                val result = chain.proceed()
+                if (defaultFullscreen() && chain.thisObject?.javaClass == itemClass) {
+                    runCatching { relabelSmallWindow(chain.args.getOrNull(0)) }
+                }
+                result
+            }
         }
 
         module.hook(click).intercept { chain ->
             if (!defaultFullscreen()) return@intercept chain.proceed()
+            val item = chain.thisObject
             val itemView = findItemView(chain.args.getOrNull(0))
             val context = itemView?.context
-            val item = chain.thisObject
             val intent = intentGetter?.let { runCatching { it.invoke(item) as? Intent }.getOrNull() }
-            val uid = uidGetter?.let { runCatching { it.invoke(item) as? Int ?: -1 }.getOrNull() } ?: -1
+            val uid = uidGetter?.let { runCatching { it.invoke(item) as? Int }.getOrNull() } ?: -1
             if (context == null || intent == null) {
+                HdDebug.log(TAG, "menu click: context=$context intent=$intent → 交回原生")
                 chain.proceed()
             } else {
                 val ok = runCatching { smallWindowLaunch?.invoke(null, context, intent, null, uid) }
                     .isSuccess
-                log(module, "menu small-window launch=$ok")
+                HdDebug.log(TAG, "menu click: small-window launch=$ok pkg=${intent.component?.packageName}")
                 null
             }
         }
+    }
+
+    /** 把菜单第一项的文字换成「小窗」（宿主用资源 id 直接 setText，只能事后覆盖）。 */
+    private fun relabelSmallWindow(holder: Any?) {
+        val itemView = findItemView(holder) ?: return
+        val text = firstTextView(itemView) ?: return
+        val label = smallWindowLabel(itemView.context)
+        if (text.text?.toString() != label) text.text = label
+    }
+
+    private fun firstTextView(root: View): android.widget.TextView? {
+        if (root is android.widget.TextView) return root
+        val group = root as? android.view.ViewGroup ?: return null
+        for (index in 0 until group.childCount) {
+            firstTextView(group.getChildAt(index))?.let { return it }
+        }
+        return null
     }
 
     private fun defaultFullscreen(): Boolean =

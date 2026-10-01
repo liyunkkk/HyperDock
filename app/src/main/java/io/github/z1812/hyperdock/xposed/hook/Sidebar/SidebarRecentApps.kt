@@ -16,6 +16,8 @@ import java.util.WeakHashMap
  */
 internal object SidebarRecentApps {
 
+    private const val TAG = "Recent"
+
     data class Entry(val pkg: String, val label: String, val icon: Drawable?)
 
     private const val LOOK_BACK_MS = 7L * 24 * 3600 * 1000
@@ -40,7 +42,10 @@ internal object SidebarRecentApps {
 
     private fun query(context: Context, limit: Int, exclude: Set<String>): List<Entry> {
         val manager = context.getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager
-            ?: return emptyList()
+        if (manager == null) {
+            io.github.z1812.hyperdock.xposed.hook.HdDebug.log(TAG, "UsageStatsManager 不可用")
+            return fallback(context, limit, exclude)
+        }
         val end = System.currentTimeMillis()
         val events = manager.queryEvents(end - LOOK_BACK_MS, end) ?: return emptyList()
         val lastUsed = HashMap<String, Long>()
@@ -53,12 +58,35 @@ internal object SidebarRecentApps {
         }
         val packageManager = context.packageManager
         val selfPackage = context.packageName
+        io.github.z1812.hyperdock.xposed.hook.HdDebug.log(TAG, "usage events 命中包数=${lastUsed.size}")
+        if (lastUsed.isEmpty()) return fallback(context, limit, exclude)
         return lastUsed.entries
             .asSequence()
             .sortedByDescending { it.value }
             .map { it.key }
             .filter { pkg ->
                 pkg != selfPackage && !exclude.contains(pkg) && isLaunchable(packageManager, pkg)
+            }
+            .take(limit)
+            .map { pkg -> Entry(pkg, label(packageManager, pkg), icon(packageManager, pkg)) }
+            .toList()
+    }
+
+    /** UsageStats 拿不到时的兜底：直接问 ActivityManager 的最近任务。 */
+    private fun fallback(context: Context, limit: Int, exclude: Set<String>): List<Entry> {
+        val manager = context.getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
+            ?: return emptyList()
+        val tasks = runCatching {
+            manager.getRecentTasks(50, android.app.ActivityManager.RECENT_IGNORE_UNAVAILABLE)
+        }.getOrNull()
+        io.github.z1812.hyperdock.xposed.hook.HdDebug.log(TAG, "fallback recentTasks=${tasks?.size ?: -1}")
+        if (tasks.isNullOrEmpty()) return emptyList()
+        val packageManager = context.packageManager
+        return tasks.asSequence()
+            .mapNotNull { it.baseIntent?.component?.packageName }
+            .distinct()
+            .filter { pkg ->
+                pkg != context.packageName && !exclude.contains(pkg) && isLaunchable(packageManager, pkg)
             }
             .take(limit)
             .map { pkg -> Entry(pkg, label(packageManager, pkg), icon(packageManager, pkg)) }

@@ -9,6 +9,7 @@ import android.widget.ImageView
 import io.github.z1812.hyperdock.PrefKeys
 import io.github.z1812.hyperdock.xposed.ConfigManager
 import io.github.z1812.hyperdock.xposed.hook.BaseHook
+import io.github.z1812.hyperdock.xposed.hook.HdDebug
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface.PackageLoadedParam
 import java.lang.reflect.InvocationHandler
@@ -776,14 +777,31 @@ object SidebarDockSlotHook : BaseHook() {
      */
     private fun injectRecent(module: XposedModule, list: List<Any>): List<Any> {
         if (!ConfigManager.getBoolean(PrefKeys.SIDEBAR_RECENT_APPS, true)) {
+            HdDebug.log(TAG, "recent: 开关关闭")
             clearRecent()
             return list
         }
-        val dividerClass = SidebarDockState.dividerClass ?: return list
+        val dividerClass = SidebarDockState.dividerClass
+        if (dividerClass == null) {
+            HdDebug.log(TAG, "recent: dividerClass 还没学到，跳过")
+            return list
+        }
         val dividerIndex = list.indexOfFirst { it.javaClass == dividerClass }
-        if (dividerIndex < 0) return list
-        val context = appContext() ?: return list
-        val entries = SidebarRecentApps.load(context, recentCount(), excludePackages(list))
+        if (dividerIndex < 0) {
+            HdDebug.log(TAG, "recent: 列表里没有分割线")
+            return list
+        }
+        val context = appContext()
+        if (context == null) {
+            HdDebug.log(TAG, "recent: 拿不到 Context")
+            return list
+        }
+        val excluded = excludePackages(list)
+        val entries = SidebarRecentApps.load(context, recentCount(), excluded)
+        HdDebug.log(
+            TAG,
+            "recent: 候选=${entries.size} 排除=${excluded.size} itemInterface=${itemInterface?.name}",
+        )
         if (entries.isEmpty()) {
             clearRecent()
             return list
