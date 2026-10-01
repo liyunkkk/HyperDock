@@ -345,6 +345,7 @@ object SidebarDockSlotHook : BaseHook() {
                     "final list n=" + injected.size + " [" +
                         injected.take(16).joinToString(",") { it.javaClass.simpleName } + "]",
                 )
+                dumpGrid(module)
                 lastInjected = injected
                 SidebarDockState.displayList = injected
                 log(
@@ -869,6 +870,7 @@ object SidebarDockSlotHook : BaseHook() {
             return list
         }
         val divider = recentDividerItem
+            ?: createHostDivider(module)
             ?: createProxyItem(module, "hyperdock::recent-divider") { holder -> bindRecentDivider(holder) }
                 ?.also { recentDividerItem = it }
             ?: return list
@@ -893,6 +895,26 @@ object SidebarDockSlotHook : BaseHook() {
             if (!pkg.isNullOrBlank()) out.add(pkg)
         }
         return out
+    }
+
+    /**
+     * 宿主自己的分割线条目（`a8.b`，`z7.u.f()` 里就是 `new a8.b()`）。
+     * 用它而不是自造代理，是为了让「绑定 / 回收」完全走宿主的原路径，避免我这边
+     * 改动的可见性被复用到应用行上。拿不到就退回自造代理。
+     */
+    private fun createHostDivider(module: XposedModule): Any? {
+        val loader = itemInterface?.classLoader ?: return null
+        val instance = runCatching {
+            val clazz = Class.forName("a8.b", false, loader)
+            clazz.getDeclaredConstructor().apply { isAccessible = true }.newInstance()
+        }.getOrNull()
+        if (instance == null) {
+            HdDebug.log(TAG, "host divider class unavailable, fallback to proxy")
+            return null
+        }
+        recentDividerItem = instance
+        HdDebug.log(TAG, "host divider instance=" + instance.javaClass.name)
+        return instance
     }
 
     private fun recentItem(module: XposedModule, entry: SidebarRecentApps.Entry): Any? {
@@ -1122,6 +1144,38 @@ object SidebarDockSlotHook : BaseHook() {
                 appendInjected(module, list, method.name)
             }
         }
+    }
+
+    /** 延时把侧边栏网格里每个子视图的实际位置量出来（判断"多出来的空格"从哪来）。 */
+    private fun dumpGrid(module: XposedModule) {
+        val view = synchronized(adapterByView) {
+            adapterByView.entries.firstOrNull { it.value === adapterInstance }?.key
+        } ?: return
+        view.postDelayed({
+            runCatching {
+                val getChildCount = view.javaClass.getMethod("getChildCount")
+                val getChildAt = view.javaClass.getMethod("getChildAt", Int::class.javaPrimitiveType)
+                val getPosition = view.javaClass.getMethod(
+                    "getChildAdapterPosition",
+                    android.view.View::class.java,
+                )
+                val count = getChildCount.invoke(view) as Int
+                val sb = StringBuilder()
+                for (index in 0 until count) {
+                    val child = getChildAt.invoke(view, index) as? android.view.View ?: continue
+                    val position = runCatching {
+                        getPosition.invoke(view, child) as Int
+                    }.getOrDefault(-1)
+                    sb.append("p").append(position)
+                        .append("(x=").append(child.left)
+                        .append(",y=").append(child.top)
+                        .append(",w=").append(child.width)
+                        .append(",h=").append(child.height)
+                        .append(") ")
+                }
+                HdDebug.log(TAG, "grid children n=" + count + " " + sb)
+            }
+        }, 900)
     }
 
     /** 把注入的最近应用/分割线补进宿主返回的列表（已经在里面就不重复加）。 */
