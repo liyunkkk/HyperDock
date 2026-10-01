@@ -41,6 +41,10 @@ object SidebarAppLaunchHook : BaseHook() {
     @Volatile private var fullscreenLaunch: Method? = null
     @Volatile private var smallWindowLaunch: Method? = null
     @Volatile private var menuHooked = false
+    @Volatile private var launcherInstance: Any? = null
+
+    /** 菜单项自己走小窗时，别被「默认全屏」那条拦截又改成全屏。 */
+    @Volatile private var bypassFullscreen = false
     @Volatile private var cachedLabel: String? = null
 
     override fun getTag() = TAG
@@ -84,8 +88,12 @@ object SidebarAppLaunchHook : BaseHook() {
             return
         }
         freeform.isAccessible = true
+        launcherInstance = runCatching {
+            launcher.getDeclaredMethod("y").invoke(null)
+        }.getOrNull()
         log(module, "freeform=${freeform.declaringClass.simpleName}.${freeform.name}")
         module.hook(freeform).intercept { chain ->
+            if (bypassFullscreen) return@intercept chain.proceed()
             if (!defaultFullscreen()) return@intercept chain.proceed()
             val args = chain.args
             val icon = args.getOrNull(0) as? ImageView
@@ -159,6 +167,9 @@ object SidebarAppLaunchHook : BaseHook() {
         val uidGetter = find {
             it.parameterCount == 0 && it.returnType == Integer.TYPE && it.name.length <= 2
         }
+        val pkgGetter = find {
+            it.parameterCount == 0 && it.returnType == String::class.java && it.name.length <= 2
+        }
         if (click == null) {
             HdDebug.log(TAG, "adopt: click method not found on ${itemClass.name}")
             return
@@ -189,13 +200,20 @@ object SidebarAppLaunchHook : BaseHook() {
             val context = itemView?.context
             val intent = intentGetter?.let { runCatching { it.invoke(item) as? Intent }.getOrNull() }
             val uid = uidGetter?.let { runCatching { it.invoke(item) as? Int }.getOrNull() } ?: -1
+            val pkg = pkgGetter?.let { runCatching { it.invoke(item) as? String }.getOrNull() }
             if (context == null || intent == null) {
                 HdDebug.log(TAG, "menu click: context=$context intent=$intent → 交回原生")
                 chain.proceed()
             } else {
-                val ok = runCatching { smallWindowLaunch?.invoke(null, context, intent, null, uid) }
-                    .isSuccess
-                HdDebug.log(TAG, "menu click: small-window launch=$ok pkg=${intent.component?.packageName}")
+                // 宿主的小窗入口就是 DockAppAnimLauncher.C（普通点击走的那条）；
+                // e0.Z 依赖 MiuiMultiWindowUtils 反射，拿不到 ActivityOptions 会静默什么都不做。
+                val icon = firstImageView(itemView)
+                val launched = runCatching {
+                    bypassFullscreen = true
+                    freeform.invoke(launcherInstance, icon, intent, pkg, uid, null)
+                }.isSuccess
+                bypassFullscreen = false
+                HdDebug.log(TAG, "menu click: freeform launch=$launched pkg=$pkg icon=${icon != null}")
                 null
             }
         }
@@ -207,6 +225,15 @@ object SidebarAppLaunchHook : BaseHook() {
         val text = firstTextView(itemView) ?: return
         val label = smallWindowLabel(itemView.context)
         if (text.text?.toString() != label) text.text = label
+    }
+
+    private fun firstImageView(root: View): ImageView? {
+        if (root is ImageView) return root
+        val group = root as? android.view.ViewGroup ?: return null
+        for (index in 0 until group.childCount) {
+            firstImageView(group.getChildAt(index))?.let { return it }
+        }
+        return null
     }
 
     private fun firstTextView(root: View): android.widget.TextView? {

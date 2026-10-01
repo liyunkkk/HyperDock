@@ -451,6 +451,13 @@ object SidebarDockSlotHook : BaseHook() {
                 SidebarDockState.shorthandClass = a
                 SidebarDockState.dividerClass = b
                 log(module, "shorthand=${a.name} divider=${b.name}")
+                HdDebug.log(TAG, "learn ok shorthand=${a.simpleName} divider=${b.simpleName} size=${list.size}")
+            } else {
+                HdDebug.log(
+                    TAG,
+                    "learn 未采纳: a=${a.simpleName} b=${b.simpleName} c=${c.simpleName} " +
+                        "slotType=${slotType?.simpleName} size=${list.size}",
+                )
             }
         }
     }
@@ -781,10 +788,21 @@ object SidebarDockSlotHook : BaseHook() {
             clearRecent()
             return list
         }
-        val dividerClass = SidebarDockState.dividerClass
+        var dividerClass = SidebarDockState.dividerClass
         if (dividerClass == null) {
-            HdDebug.log(TAG, "recent: dividerClass 还没学到，跳过")
-            return list
+            // 原生顺序恒为 [速记][分割线][应用…]，按位置兜底并回填状态（占格计算要用）。
+            if (list.size < 2) {
+                HdDebug.log(TAG, "recent: 列表太短 size=${list.size}")
+                return list
+            }
+            dividerClass = list[1].javaClass
+            SidebarDockState.shorthandClass = SidebarDockState.shorthandClass ?: list[0].javaClass
+            SidebarDockState.dividerClass = dividerClass
+            HdDebug.log(
+                TAG,
+                "recent: 按位置兜底 shorthand=${list[0].javaClass.simpleName} " +
+                    "divider=${dividerClass.simpleName} size=${list.size}",
+            )
         }
         val dividerIndex = list.indexOfFirst { it.javaClass == dividerClass }
         if (dividerIndex < 0) {
