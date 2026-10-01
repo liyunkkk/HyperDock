@@ -1133,7 +1133,7 @@ object SidebarDockSlotHook : BaseHook() {
             // 外层深色柔光：让线在浅色面板上也有边界
             paint.shader = android.graphics.LinearGradient(
                 0f, top, 0f, bottom,
-                intArrayOf(0x00000000, 0x59000000, 0x00000000),
+                intArrayOf(0x00000000, 0x2E000000, 0x00000000),
                 floatArrayOf(0f, 0.5f, 1f),
                 android.graphics.Shader.TileMode.CLAMP,
             )
@@ -1142,7 +1142,7 @@ object SidebarDockSlotHook : BaseHook() {
 
             // 中间深灰芯
             paint.shader = null
-            paint.color = 0xC0404040.toInt()
+            paint.color = 0x9A707070.toInt()
             val core = (height * 0.55f).coerceAtLeast(3f)
             rect.set(bounds.left.toFloat(), centerY - core / 2f, bounds.right.toFloat(), centerY + core / 2f)
             canvas.drawRoundRect(rect, core / 2f, core / 2f, paint)
@@ -1356,7 +1356,12 @@ object SidebarDockSlotHook : BaseHook() {
             runCatching {
                 module.hook(ctor).intercept { chain ->
                     val id = chain.args.firstOrNull { it is Int } as? Int
-                    HdDebug.log(TAG, "panel title resId=" + id + " args=" + chain.args.size)
+                    if (id == 2131886858 || id == 2131886857) {
+                        val from = Throwable().stackTrace.drop(2).take(5).joinToString(" <- ") {
+                            it.className.substringAfterLast('.') + "." + it.methodName + ":" + it.lineNumber
+                        }
+                        HdDebug.log(TAG, "panel title resId=" + id + " from " + from)
+                    }
                     chain.proceed()
                 }
             }
