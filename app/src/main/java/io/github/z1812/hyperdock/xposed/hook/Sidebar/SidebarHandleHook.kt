@@ -216,15 +216,15 @@ object SidebarHandleHook : BaseHook() {
             }.onFailure { logWarn(module, "resize touch area failed: $it") }
         }
 
-        // 可见小横条长度跟随触摸区域：以顶部为轴纵向拉伸，
-        // 方向与 cover view 窗口「y 不动、height 向下长」一致。
+        // 可见小横条不拉伸：本体是 3dp × 66dp 的竖线，装在 32dp × 112dp 的视图里，
+        // 面板窗口 wrap_content（收起态 112dp 高），拉伸会被窗口裁掉一截
+        // （3 倍时 198dp 只剩 112dp 可见）。要「黑条长度=触摸区域」只能自绘，
+        // 见项目笔记里的方案说明。
         if (handle != null) {
-            val scale = scaleFactor()
             runCatching {
-                handle.pivotY = 0f
-                handle.scaleY = if (scale > 1) scale.toFloat() else 1f
-                log(module, "handle bar scaleY=${handle.scaleY}")
-            }.onFailure { logWarn(module, "stretch handle failed: $it") }
+                handle.pivotY = handle.height / 2f
+                handle.scaleY = 1f
+            }
         }
 
         // 触摸转发
