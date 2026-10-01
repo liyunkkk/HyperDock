@@ -101,6 +101,7 @@ object SidebarDockSlotHook : BaseHook() {
         }
         hookDockHeightList(module, loader)
         hookDetachedSmoothScroll(module, loader)
+        hookFreeformFilter(module, loader)
         // 注意：**不要**再往宿主自己的数据列表（z7.u.f()）里塞条目。
         // 宿主的「刷新列表」路径会遍历它，塞进去会让它在侧边栏已关闭时走
         // smoothScrollToPosition 分支 → RecyclerView 已 detach → NPE 闪退
@@ -855,12 +856,10 @@ object SidebarDockSlotHook : BaseHook() {
                 return list
             }
         } else if (!known.containsAll(classes)) {
-            HdDebug.log(
-                TAG,
-                "recent: 不是侧边栏本体列表（n=" + list.size + " classes=" +
-                    classes.map { it.simpleName } + "），跳过",
-            )
-            return list
+            // 这是全部应用面板的列表：[推荐应用标题][应用…][全部小窗应用标题][应用…]。
+            // 宿主自己的「侧边栏内显示推荐应用」开关在这台机器上没有入口，
+            // 直接把第一组（标题 + 它下面的应用）整段去掉。
+            return stripRecommendGroup(module, list, known)
         }
 
         // 侧边栏这份列表在宿主当前版本里只有应用条目（日志实测 a=b=c 同类），
@@ -910,6 +909,25 @@ object SidebarDockSlotHook : BaseHook() {
         out.add(divider)
         out.addAll(list.subList(insertAt, list.size))
         log(module, "recent injected=${items.size} at=$insertAt by=$locatedBy size=${out.size}")
+        return out
+    }
+
+    /** 面板列表：去掉「推荐应用」那一组（第一个标题到第二个标题之间）。 */
+    private fun stripRecommendGroup(module: XposedModule, list: List<Any>, dockClasses: Set<Class<*>>): List<Any> {
+        val headerIndexes = list.withIndex()
+            .filter { it.value.javaClass !in dockClasses }
+            .map { it.index }
+        if (headerIndexes.size < 2) {
+            HdDebug.log(TAG, "panel: 没找到两个分组标题（headers=" + headerIndexes.size + "），不动")
+            return list
+        }
+        val from = headerIndexes[0]
+        val to = headerIndexes[1]
+        if (to <= from) return list
+        val out = ArrayList<Any>(list.size - (to - from))
+        out.addAll(list.subList(0, from))
+        out.addAll(list.subList(to, list.size))
+        HdDebug.log(TAG, "panel: 去掉推荐应用组 " + (to - from) + " 条，剩 " + out.size)
         return out
     }
 
@@ -1083,7 +1101,7 @@ object SidebarDockSlotHook : BaseHook() {
             // 外层深色柔光：让线在浅色面板上也有边界
             paint.shader = android.graphics.LinearGradient(
                 0f, top, 0f, bottom,
-                intArrayOf(0x00000000, 0x40000000, 0x00000000),
+                intArrayOf(0x00000000, 0x59000000, 0x00000000),
                 floatArrayOf(0f, 0.5f, 1f),
                 android.graphics.Shader.TileMode.CLAMP,
             )
@@ -1092,7 +1110,7 @@ object SidebarDockSlotHook : BaseHook() {
 
             // 中间深灰芯
             paint.shader = null
-            paint.color = 0xA0606060.toInt()
+            paint.color = 0xC0404040.toInt()
             val core = (height * 0.55f).coerceAtLeast(3f)
             rect.set(bounds.left.toFloat(), centerY - core / 2f, bounds.right.toFloat(), centerY + core / 2f)
             canvas.drawRoundRect(rect, core / 2f, core / 2f, paint)
@@ -1191,6 +1209,31 @@ object SidebarDockSlotHook : BaseHook() {
             }
         }
         HdDebug.log(TAG, "detached smooth scroll guard installed")
+    }
+
+    /**
+     * 宿主把「不支持小窗（freeform）」的应用从全部小窗应用里滤掉
+     * （`AllAppsRepository.filterAvailableShortcuts` 里那条日志）。用户希望全都列出来，
+     * 所以按日志字符串定位该方法，直接返回过滤前的列表。
+     */
+    private fun hookFreeformFilter(module: XposedModule, loader: ClassLoader) {
+        val method = findMethodByString(loader, "do not support freeform")
+        if (method == null) {
+            HdDebug.log(TAG, "freeform filter not found")
+            return
+        }
+        method.isAccessible = true
+        HdDebug.log(TAG, "freeform filter=" + method.declaringClass.simpleName + "." + method.name)
+        module.hook(method).intercept { chain ->
+            val args = chain.args
+            val source = args.firstOrNull { it is List<*> } as? List<Any>
+            if (source == null) {
+                chain.proceed()
+            } else {
+                HdDebug.log(TAG, "freeform filter bypassed, 保留 " + source.size + " 条")
+                source
+            }
+        }
     }
 
     /** 侧边栏网格（RecyclerView）。 */

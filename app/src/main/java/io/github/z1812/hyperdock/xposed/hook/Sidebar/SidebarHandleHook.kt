@@ -402,7 +402,7 @@ object SidebarHandleHook : BaseHook() {
         return if (value > 0) value else (fallbackDp * res.displayMetrics.density).toInt()
     }
 
-    /** 中性半透明灰：浅底深底都看得见（原生会按背景采样自适应，这里做不到）。 */
+    /** 深灰（约 85% 不透明）：浅底深底都清楚（原生会按背景采样自适应，这里做不到）。 */
     private class BarDrawable(
         private val barWidth: Int,
         private val margin: Int,
@@ -411,7 +411,7 @@ object SidebarHandleHook : BaseHook() {
         private val isLeft: Boolean,
     ) : Drawable() {
 
-        private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(140, 128, 128, 128) }
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(215, 45, 45, 45) }
         private val rect = RectF()
 
         override fun draw(canvas: Canvas) {
