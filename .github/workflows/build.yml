@@ -80,9 +80,11 @@ jobs:
           APK: ${{ steps.apk.outputs.file }}
         run: |
           TAG="build-${{ github.run_number }}"
-          gh release create "$TAG" "$APK" --title "自动构建 $TAG" \
-            --notes "commit ${{ github.sha }} · run ${{ github.run_number }}" || \
-          gh release upload "$TAG" "$APK" --clobber
+          # 先清理旧构建，再创建本次的。
+          # （顺序反了会把刚建好的这个也删掉：gh release list 是异步可见的，
+          #   曾经出现过刚 create 完就被下面这轮清理带走的情况。）
           gh release list --limit 100 --json tagName --jq '.[].tagName' \
-            | grep '^build-' | grep -v "^${TAG}$" \
+            | grep '^build-' \
             | while read -r t; do gh release delete "$t" --yes --cleanup-tag || true; done
+          gh release create "$TAG" "$APK" --title "自动构建 $TAG" \
+            --notes "commit ${{ github.sha }} · run ${{ github.run_number }}"
