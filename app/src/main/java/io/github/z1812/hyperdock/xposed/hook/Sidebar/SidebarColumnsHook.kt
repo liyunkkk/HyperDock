@@ -122,6 +122,9 @@ object SidebarColumnsHook : BaseHook() {
     @Volatile private var spanLookupInstance: Any? = null
     @Volatile private var spanLookupColumns = 1
 
+    /** 宿主可能在重建面板时重新装它自己的占格表，留一份 setter 以便再抢回来。 */
+    @Volatile private var spanLookupSetter: java.lang.reflect.Method? = null
+
     override fun getTag() = TAG
 
     override fun onInit(module: XposedModule, param: PackageLoadedParam) {
