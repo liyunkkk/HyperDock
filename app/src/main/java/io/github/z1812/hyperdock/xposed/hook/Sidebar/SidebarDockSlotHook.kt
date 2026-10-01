@@ -669,6 +669,24 @@ object SidebarDockSlotHook : BaseHook() {
             cleaned = true
         }
         if (cleaned) HdDebug.log(TAG, "recycled clean at $position")
+        if (position <= 12) dumpItemState(position, itemView)
+    }
+
+    /** 逐格渲染状态：定位「哪一格是空的、为什么空」。 */
+    private fun dumpItemState(position: Int, itemView: View) {
+        val icon = itemView.findViewById<View>(iconResId) as? ImageView
+        val divider = itemView.findViewById<View>(dividerResId)
+        val placeholder = itemView.findViewById<View>(placeholderResId)
+        HdDebug.log(
+            TAG,
+            "item pos=" + position +
+                " cls=" + (itemView.javaClass.simpleName) +
+                " w=" + itemView.width +
+                " iconVis=" + icon?.visibility + " iconImg=" + (icon?.drawable != null) +
+                " divVis=" + divider?.visibility +
+                " phVis=" + placeholder?.visibility +
+                " fg=" + (itemView.foreground != null),
+        )
     }
 
     private fun applyDividerWidth(divider: View, context: Context) {
@@ -945,6 +963,8 @@ object SidebarDockSlotHook : BaseHook() {
         val icon = itemView.findViewById<View>(iconResId) as? ImageView
         icon?.visibility = View.VISIBLE
         icon?.setImageDrawable(null)
+        val placeholder = itemView.findViewById<View>(placeholderResId)
+        placeholder?.visibility = View.GONE
         val divider = if (dividerResId != 0) itemView.findViewById<View>(dividerResId) else null
         if (divider == null) {
             // 兜底：宿主布局里没有分割线 view 时自己画一条（当前版本实测有，走不到这里）。
