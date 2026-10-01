@@ -21,6 +21,9 @@ internal object SidebarRecentApps {
     data class Entry(val pkg: String, val label: String, val icon: Drawable?)
 
     private const val LOOK_BACK_MS = 7L * 24 * 3600 * 1000
+
+    /** 缓存只挡「同一次打开里连续几次提交」，换一次侧边栏就重算。 */
+    private const val CACHE_MS = 2_000L
     private val iconCache = Collections.synchronizedMap(WeakHashMap<String, Drawable>())
     private val labelCache = Collections.synchronizedMap(WeakHashMap<String, String>())
 
@@ -32,12 +35,17 @@ internal object SidebarRecentApps {
         if (limit <= 0) return emptyList()
         val key = "$limit|" + exclude.sorted().joinToString(",")
         val now = System.currentTimeMillis()
-        if (key == cachedKey && now - cachedAt < 20_000L) return cached
+        if (key == cachedKey && now - cachedAt < CACHE_MS) return cached
         val entries = runCatching { query(context, limit, exclude) }.getOrDefault(emptyList())
         cachedKey = key
         cachedAt = now
         cached = entries
         return entries
+    }
+
+    /** 立刻作废缓存（点过条目、或重新打开侧边栏时用）。 */
+    fun refresh() {
+        cachedAt = 0L
     }
 
     private fun query(context: Context, limit: Int, exclude: Set<String>): List<Entry> {
@@ -58,14 +66,20 @@ internal object SidebarRecentApps {
         }
         val packageManager = context.packageManager
         val selfPackage = context.packageName
-        io.github.z1812.hyperdock.xposed.hook.HdDebug.log(TAG, "usage events 命中包数=${lastUsed.size}")
+        // 刚打开的那个应用（当前前台）不该再出现在「最近应用」里。
+        val foreground = foregroundPackage(context, lastUsed)
+        io.github.z1812.hyperdock.xposed.hook.HdDebug.log(
+            TAG,
+            "usage events 命中包数=${lastUsed.size} 前台=${foreground}",
+        )
         if (lastUsed.isEmpty()) return fallback(context, limit, exclude)
         return lastUsed.entries
             .asSequence()
             .sortedByDescending { it.value }
             .map { it.key }
             .filter { pkg ->
-                pkg != selfPackage && !exclude.contains(pkg) && isLaunchable(packageManager, pkg)
+                pkg != selfPackage && pkg != foreground &&
+                    !exclude.contains(pkg) && isLaunchable(packageManager, pkg)
             }
             .take(limit)
             .map { pkg -> Entry(pkg, label(packageManager, pkg), icon(packageManager, pkg)) }
@@ -91,6 +105,16 @@ internal object SidebarRecentApps {
             .take(limit)
             .map { pkg -> Entry(pkg, label(packageManager, pkg), icon(packageManager, pkg)) }
             .toList()
+    }
+
+    /** 当前前台应用：优先问 ActivityManager，拿不到就退回「最近一次 RESUMED 的包」。 */
+    private fun foregroundPackage(context: Context, lastUsed: Map<String, Long>): String? {
+        val fromTasks = runCatching {
+            val manager = context.getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
+            manager?.getRunningTasks(1)?.firstOrNull()?.topActivity?.packageName
+        }.getOrNull()
+        if (!fromTasks.isNullOrBlank()) return fromTasks
+        return lastUsed.maxByOrNull { it.value }?.key
     }
 
     private fun isLaunchable(packageManager: android.content.pm.PackageManager, pkg: String): Boolean =

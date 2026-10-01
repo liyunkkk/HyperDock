@@ -893,31 +893,16 @@ object SidebarDockSlotHook : BaseHook() {
         val out = HashSet<String>()
         list.forEach { item ->
             val pkg = runCatching {
+                // 宿主条目 a8.c：g() 返回 z7.c，字段 b 是包名。
+                val model = item.javaClass.getMethod("g").invoke(item)
+                val field = model.javaClass.getDeclaredField("b").apply { isAccessible = true }
+                field.get(model) as? String
+            }.getOrNull() ?: runCatching {
                 item.javaClass.getMethod("getPackageName").invoke(item) as? String
             }.getOrNull()
             if (!pkg.isNullOrBlank()) out.add(pkg)
         }
         return out
-    }
-
-    /**
-     * 宿主自己的分割线条目（`a8.b`，`z7.u.f()` 里就是 `new a8.b()`）。
-     * 用它而不是自造代理，是为了让「绑定 / 回收」完全走宿主的原路径，避免我这边
-     * 改动的可见性被复用到应用行上。拿不到就退回自造代理。
-     */
-    private fun createHostDivider(module: XposedModule): Any? {
-        val loader = itemInterface?.classLoader ?: return null
-        val instance = runCatching {
-            val clazz = Class.forName("a8.b", false, loader)
-            clazz.getDeclaredConstructor().apply { isAccessible = true }.newInstance()
-        }.getOrNull()
-        if (instance == null) {
-            HdDebug.log(TAG, "host divider class unavailable, fallback to proxy")
-            return null
-        }
-        recentDividerItem = instance
-        HdDebug.log(TAG, "host divider instance=" + instance.javaClass.name)
-        return instance
     }
 
     private fun recentItem(module: XposedModule, entry: SidebarRecentApps.Entry): Any? {
@@ -968,7 +953,10 @@ object SidebarDockSlotHook : BaseHook() {
             val listener = View.OnClickListener {
                 val launched = runCatching { SidebarShortcutController.launchById(context, id) }
                     .getOrDefault(false)
-                if (launched) runCatching { SidebarCloseHook.closeSidebar() }
+                if (launched) {
+                    SidebarRecentApps.refresh()
+                    runCatching { SidebarCloseHook.closeSidebar() }
+                }
             }
             itemView.setOnClickListener(listener)
             itemView.findViewById<View>(iconResId)?.setOnClickListener(listener)
