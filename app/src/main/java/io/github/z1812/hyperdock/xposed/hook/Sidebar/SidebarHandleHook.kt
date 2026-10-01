@@ -21,6 +21,7 @@ import io.github.libxposed.api.XposedModuleInterface.PackageLoadedParam
 import io.github.z1812.hyperdock.PrefKeys
 import io.github.z1812.hyperdock.xposed.ConfigManager
 import io.github.z1812.hyperdock.xposed.hook.BaseHook
+import io.github.z1812.hyperdock.xposed.hook.HdDebug
 import java.lang.ref.WeakReference
 import java.lang.reflect.Method
 import java.util.Collections
