@@ -905,6 +905,26 @@ object SidebarDockSlotHook : BaseHook() {
         return out
     }
 
+    /**
+     * 宿主自己的分割线条目（`a8.b`，`z7.u.f()` 里就是 `new a8.b()`）。
+     * 用它而不是自造代理，是为了让「绑定 / 回收」完全走宿主的原路径，避免我这边
+     * 改动的可见性被复用到应用行上。拿不到就退回自造代理。
+     */
+    private fun createHostDivider(module: XposedModule): Any? {
+        val loader = itemInterface?.classLoader ?: return null
+        val instance = runCatching {
+            val clazz = Class.forName("a8.b", false, loader)
+            clazz.getDeclaredConstructor().apply { isAccessible = true }.newInstance()
+        }.getOrNull()
+        if (instance == null) {
+            HdDebug.log(TAG, "host divider class unavailable, fallback to proxy")
+            return null
+        }
+        recentDividerItem = instance
+        HdDebug.log(TAG, "host divider instance=" + instance.javaClass.name)
+        return instance
+    }
+
     private fun recentItem(module: XposedModule, entry: SidebarRecentApps.Entry): Any? {
         recentItemByPackage[entry.pkg]?.let { return it }
         val item = createProxyItem(module, "hyperdock::recent::" + entry.pkg) { holder ->
