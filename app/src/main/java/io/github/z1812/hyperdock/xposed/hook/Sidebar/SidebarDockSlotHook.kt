@@ -12,6 +12,7 @@ import io.github.z1812.hyperdock.xposed.hook.BaseHook
 import io.github.z1812.hyperdock.xposed.hook.HdDebug
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface.PackageLoadedParam
+import org.luckypray.dexkit.DexKitBridge
 import java.lang.reflect.InvocationHandler
 import java.lang.reflect.Method
 import java.lang.reflect.Modifier
@@ -52,6 +53,9 @@ object SidebarDockSlotHook : BaseHook() {
     private const val DIMEN_ITEM_PADDING = "dock_item_padding"
 
     private const val MAX_PARENT_DEPTH = 16
+
+    /** 宿主算面板高度那个方法的日志字符串（方法名随版本漂移，按字符串定位）。 */
+    private const val HEIGHT_LIST_LOG = "getDockAppsForNewDockHeight"
 
     @Volatile private var turboClass: Class<*>? = null
     @Volatile private var holderClass: Class<*>? = null
@@ -95,6 +99,7 @@ object SidebarDockSlotHook : BaseHook() {
             logWarn(module, "no class loader; dock slot disabled")
             return
         }
+        hookDockHeightList(module, loader)
         turboClass = runCatching { Class.forName(TURBO_LAYOUT_CLASS, false, loader) }.getOrNull()
         if (turboClass == null) {
             logWarn(module, "TurboLayout unavailable; dock slot disabled")
@@ -981,6 +986,45 @@ object SidebarDockSlotHook : BaseHook() {
         method.isAccessible = true
         method.invoke(null) as? Context
     }.getOrNull()
+
+    /** 按方法体内的字符串定位方法（与 SidebarCloseHook 同款做法）。 */
+    private fun findMethodByString(loader: ClassLoader, string: String): Method? =
+        runCatching {
+            System.loadLibrary("dexkit")
+            DexKitBridge.create(loader, false).use { bridge ->
+                bridge.findMethod {
+                    matcher { usingStrings(string) }
+                }.firstOrNull()?.getMethodInstance(loader)
+            }
+        }.getOrNull()
+
+    /**
+     * 宿主用 `z7.u.e()`（方法体日志 `getDockAppsForNewDockHeight`）算侧边栏面板高度。
+     * 我们往 adapter 里多插了条目，这份高度列表必须同步加，否则面板背景只包住原来那几行，
+     * 多出来的图标会露在面板外面。
+     */
+    private fun hookDockHeightList(module: XposedModule, loader: ClassLoader) {
+        val method = findMethodByString(loader, HEIGHT_LIST_LOG)
+        if (method == null) {
+            HdDebug.log(TAG, "height list method not found")
+            return
+        }
+        method.isAccessible = true
+        HdDebug.log(TAG, "height list method=" + method.declaringClass.simpleName + "." + method.name)
+        module.hook(method).intercept { chain ->
+            val result = chain.proceed()
+            val list = result as? List<Any> ?: return@intercept result
+            val extras = ArrayList<Any>(SidebarDockState.recentItems.size + 1)
+            extras.addAll(SidebarDockState.recentItems)
+            SidebarDockState.recentDivider?.let { extras.add(it) }
+            if (extras.isEmpty()) return@intercept result
+            val out = ArrayList<Any>(list.size + extras.size)
+            out.addAll(list)
+            out.addAll(extras)
+            HdDebug.log(TAG, "height list: " + list.size + " → " + out.size)
+            out
+        }
+    }
 
     private fun isUiProcess(packageName: String, processName: String): Boolean {
         if (processName.isEmpty()) return true
