@@ -1244,9 +1244,13 @@ object SidebarDockSlotHook : BaseHook() {
     }
 
     /**
-     * 宿主把「不支持小窗（freeform）」的应用从全部小窗应用里滤掉
-     * （`AllAppsRepository.filterAvailableShortcuts` 里那条日志）。用户希望全都列出来，
-     * 所以按日志字符串定位该方法，直接返回过滤前的列表。
+     * 「全部小窗应用」那份列表。
+     *
+     * 宿主先按自己的白名单过滤（日志 `do not support freeform`），再把结果交给面板，
+     * 所以没声明小窗支持的应用（例如 Google 身份验证器）永远不出现。用户要「全都列出来」，
+     * 这里按日志字符串定位该方法，返回「原始列表 + 全部第三方应用」：
+     * 用宿主自己的模型 `z7.c(pkg, activity, uid)` → `a8.c(z7.c)` 造真实条目，
+     * 图标与点击都走宿主原有的那套，不自己造代理。
      */
     private fun hookFreeformFilter(module: XposedModule, loader: ClassLoader) {
         val method = findMethodByString(loader, "do not support freeform")
@@ -1257,27 +1261,75 @@ object SidebarDockSlotHook : BaseHook() {
         method.isAccessible = true
         HdDebug.log(TAG, "freeform filter=" + method.declaringClass.simpleName + "." + method.name)
         module.hook(method).intercept { chain ->
-            val args = chain.args
-            val source = args.firstOrNull { it is List<*> } as? List<Any>
+            val source = chain.args.firstOrNull { it is List<*> } as? List<Any>
             if (source == null) {
                 chain.proceed()
             } else {
-                HdDebug.log(TAG, "freeform filter bypassed, 保留 " + source.size + " 条")
-                source
+                val merged = appendThirdPartyApps(module, chain.thisObject, source, loader)
+                HdDebug.log(TAG, "freeform list " + source.size + " → " + merged.size)
+                merged
             }
         }
     }
 
-    /** 条目的「类名:包名」，用于诊断日志。 */
-    private fun describe(item: Any?): String {
-        val target = item ?: return "null"
-        val pkg = runCatching {
-            val model = target.javaClass.getMethod("g").invoke(target)
-            val field = model.javaClass.getDeclaredField("b").apply { isAccessible = true }
-            field.get(model) as? String
-        }.getOrNull()
-        return if (pkg.isNullOrBlank()) target.javaClass.simpleName else target.javaClass.simpleName + ":" + pkg
+    /** 把「有桌面入口的第三方应用」补进小窗列表（去重，已支持的排在前面）。 */
+    private fun appendThirdPartyApps(
+        module: XposedModule,
+        repository: Any?,
+        source: List<Any>,
+        loader: ClassLoader,
+    ): List<Any> {
+        val holder = repository ?: return source
+        val context = runCatching {
+            holder.javaClass.declaredFields.asSequence()
+                .firstOrNull { android.content.Context::class.java.isAssignableFrom(it.type) }
+                ?.apply { isAccessible = true }
+                ?.get(holder) as? android.content.Context
+        }.getOrNull() ?: appContext() ?: return source
+        val pm = context.packageManager
+        val existing = HashSet<String>()
+        source.forEach { item ->
+            describePackage(item)?.let { existing.add(it) }
+        }
+        val appClass = runCatching { Class.forName("a8.c", false, loader) }.getOrNull() ?: return source
+        val appInfoClass = runCatching { Class.forName("z7.c", false, loader) }.getOrNull() ?: return source
+        val zCtor = runCatching {
+            appInfoClass.getConstructor(String::class.java, String::class.java, Integer.TYPE)
+        }.getOrNull() ?: return source
+        val itemCtor = runCatching { appClass.getConstructor(appInfoClass) }.getOrNull() ?: return source
+
+        val out = ArrayList<Any>(source)
+        var added = 0
+        runCatching {
+            pm.getInstalledApplications(0).forEach { info ->
+                val pkg = info.packageName ?: return@forEach
+                if (pkg == context.packageName) return@forEach
+                if (existing.contains(pkg)) return@forEach
+                // 只要第三方（不含系统）且能启动
+                if (info.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM != 0) return@forEach
+                if (info.flags and android.content.pm.ApplicationInfo.FLAG_UPDATED_SYSTEM_APP != 0) return@forEach
+                val launch = runCatching { pm.getLaunchIntentForPackage(pkg) }.getOrNull() ?: return@forEach
+                val activity = launch.component?.className ?: return@forEach
+                runCatching {
+                    val appInfo = zCtor.newInstance(pkg, activity, info.uid)
+                    out.add(itemCtor.newInstance(appInfo))
+                    added++
+                }
+            }
+        }.onFailure { HdDebug.log(TAG, "append third-party failed: $it") }
+        HdDebug.log(TAG, "append third-party added=$added total=" + out.size)
+        return out
     }
+
+    private fun describePackage(item: Any?): String? = runCatching {
+        val target = item ?: return null
+        val model = runCatching { target.javaClass.getMethod("g").invoke(target) }.getOrNull() ?: target
+        val field = generateSequence(model.javaClass as Class<*>?) { it.superclass }
+            .flatMap { runCatching { it.declaredFields.asSequence() }.getOrDefault(emptySequence()) }
+            .firstOrNull { it.name == "b" && it.type == String::class.java }
+        field?.isAccessible = true
+        field?.get(model) as? String
+    }.getOrNull()
 
     /** 侧边栏网格（RecyclerView）。 */
     private fun dockGridView(): android.view.View? = synchronized(adapterByView) {
