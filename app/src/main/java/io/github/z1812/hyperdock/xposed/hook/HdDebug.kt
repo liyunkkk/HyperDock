@@ -1,6 +1,7 @@
 package io.github.z1812.hyperdock.xposed.hook
 
 import android.content.Context
+import io.github.libxposed.api.XposedModule
 import java.io.File
 
 /**
@@ -17,6 +18,30 @@ internal object HdDebug {
 
     @Volatile private var file: File? = null
     @Volatile private var failed = false
+    @Volatile private var context: Context? = null
+    @Volatile private var probeInstalled = false
+
+    /**
+     * `onPackageLoaded` 早于 Application 创建，那会儿拿不到 Context，
+     * 所以挂一个 Application.attach 探针，进程一起来就记住 Context 并落第一行日志。
+     */
+    fun installContextProbe(module: XposedModule, loader: ClassLoader) {
+        if (probeInstalled) return
+        probeInstalled = true
+        runCatching {
+            val appClass = Class.forName("android.app.Application", false, loader)
+            val attach = appClass.getDeclaredMethod("attach", Context::class.java)
+            attach.isAccessible = true
+            module.hook(attach).intercept { chain ->
+                val result = chain.proceed()
+                (chain.thisObject as? Context)?.let { ctx ->
+                    context = ctx
+                    log("HdDebug", "Application attached, log → " + File(ctx.filesDir, FILE_NAME).absolutePath)
+                }
+                result
+            }
+        }.onFailure { failed = false; log("HdDebug", "context probe failed: $it") }
+    }
 
     fun log(tag: String, message: String) {
         if (failed) return
@@ -29,7 +54,7 @@ internal object HdDebug {
 
     private fun resolve(): File? {
         file?.let { return it }
-        val context = appContext() ?: return null
+        val context = context ?: appContext() ?: return null
         val created = File(context.filesDir, FILE_NAME)
         file = created
         return created

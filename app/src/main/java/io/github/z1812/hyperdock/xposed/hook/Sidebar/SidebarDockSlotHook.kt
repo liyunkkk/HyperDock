@@ -873,7 +873,9 @@ object SidebarDockSlotHook : BaseHook() {
     }
 
     private fun bindRecent(module: XposedModule, holder: Any?, entry: SidebarRecentApps.Entry) {
-        val itemView = findItemView(holder) ?: return
+        val itemView = findItemView(holder)
+        HdDebug.log(TAG, "bindRecent ${entry.pkg} itemView=${itemView != null}")
+        if (itemView == null) return
         val context = itemView.context ?: return
         resolveResources(context)
         applyRecentAppearance(itemView, entry.icon)
