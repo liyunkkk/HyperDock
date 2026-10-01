@@ -3,8 +3,8 @@ package io.github.z1812.hyperdock.xposed.hook.Sidebar
 import android.app.Application
 import android.content.Context
 import android.content.Intent
+import android.view.View
 import android.widget.ImageView
-import androidx.recyclerview.widget.RecyclerView
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface.PackageLoadedParam
 import io.github.z1812.hyperdock.PrefKeys
@@ -123,8 +123,11 @@ object SidebarAppLaunchHook : BaseHook() {
             .firstOrNull { it.isNotEmpty() } ?: return
         val fullscreenItem = list.firstOrNull() ?: return
         val itemClass = fullscreenItem.javaClass
+        // 1 参方法只有两个：c(holder) 是点击、j(Context) 是文案。
         val click = itemClass.declaredMethods.firstOrNull { method ->
-            method.parameterCount == 1 && RecyclerView.ViewHolder::class.java.isAssignableFrom(method.parameterTypes[0])
+            method.parameterCount == 1 &&
+                method.parameterTypes[0] != Context::class.java &&
+                !method.parameterTypes[0].isPrimitive
         }
         val label = itemClass.declaredMethods.firstOrNull { method ->
             method.parameterCount == 1 && method.parameterTypes[0] == Context::class.java &&
@@ -153,8 +156,8 @@ object SidebarAppLaunchHook : BaseHook() {
 
         module.hook(click).intercept { chain ->
             if (!defaultFullscreen()) return@intercept chain.proceed()
-            val holder = chain.args.getOrNull(0) as? RecyclerView.ViewHolder
-            val context = holder?.itemView?.context
+            val itemView = findItemView(chain.args.getOrNull(0))
+            val context = itemView?.context
             val item = chain.thisObject
             val intent = intentGetter?.let { runCatching { it.invoke(item) as? Intent }.getOrNull() }
             val uid = uidGetter?.let { runCatching { it.invoke(item) as? Int ?: -1 }.getOrNull() } ?: -1
@@ -192,6 +195,19 @@ object SidebarAppLaunchHook : BaseHook() {
         val label = resolved ?: "小窗"
         cachedLabel = label
         return label
+    }
+
+    /** 取 ViewHolder 的 itemView（按字段名，宿主用的是 miuix 的 RecyclerView）。 */
+    private fun findItemView(holder: Any?): View? {
+        val target = holder ?: return null
+        val field = generateSequence(target.javaClass as Class<*>?) { it.superclass }
+            .flatMap { runCatching { it.declaredFields.asSequence() }.getOrDefault(emptySequence()) }
+            .firstOrNull { it.name == "itemView" && View::class.java.isAssignableFrom(it.type) }
+            ?: return null
+        return runCatching {
+            field.isAccessible = true
+            field.get(target) as? View
+        }.getOrNull()
     }
 
     private fun isUiProcess(packageName: String, processName: String): Boolean {
