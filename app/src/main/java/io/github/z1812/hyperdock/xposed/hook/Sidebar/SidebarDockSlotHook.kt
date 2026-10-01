@@ -842,6 +842,27 @@ object SidebarDockSlotHook : BaseHook() {
             clearRecent()
             return list
         }
+        // 只往「侧边栏本体」那份列表注入：全部应用面板复用同一个 adapter，
+        // 它的列表里有分组条目（类更多），往那里注入会让面板里冒出最近应用和分割线。
+        val classes = list.map { it.javaClass }.toSet()
+        val known = SidebarDockState.dockClasses
+        if (known.isEmpty()) {
+            if (list.size <= 12) {
+                SidebarDockState.dockClasses = classes
+                HdDebug.log(TAG, "recent: 记住侧边栏列表类集合 " + classes.map { it.simpleName })
+            } else {
+                HdDebug.log(TAG, "recent: 首次见到的列表偏大 n=" + list.size + "，先不注入")
+                return list
+            }
+        } else if (!known.containsAll(classes)) {
+            HdDebug.log(
+                TAG,
+                "recent: 不是侧边栏本体列表（n=" + list.size + " classes=" +
+                    classes.map { it.simpleName } + "），跳过",
+            )
+            return list
+        }
+
         // 侧边栏这份列表在宿主当前版本里只有应用条目（日志实测 a=b=c 同类），
         // 没有独立的「速记/分割线」条目：所以只有 learn() 真的学到分割线类时才按它定位，
         // 否则整组插到列表最前面（= 常用应用上方）。
