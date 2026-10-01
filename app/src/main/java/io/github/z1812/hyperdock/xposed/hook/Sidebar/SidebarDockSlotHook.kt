@@ -1331,6 +1331,13 @@ object SidebarDockSlotHook : BaseHook() {
         field?.get(model) as? String
     }.getOrNull()
 
+    /** 条目的「类名:包名」，用于诊断日志。 */
+    private fun describe(item: Any?): String {
+        val target = item ?: return "null"
+        val pkg = describePackage(target)
+        return if (pkg.isNullOrBlank()) target.javaClass.simpleName else target.javaClass.simpleName + ":" + pkg
+    }
+
     /** 侧边栏网格（RecyclerView）。 */
     private fun dockGridView(): android.view.View? = synchronized(adapterByView) {
         adapterByView.entries.firstOrNull { it.value === adapterInstance }?.key
