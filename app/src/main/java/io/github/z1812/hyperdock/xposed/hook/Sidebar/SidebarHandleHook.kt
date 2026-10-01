@@ -216,6 +216,17 @@ object SidebarHandleHook : BaseHook() {
             }.onFailure { logWarn(module, "resize touch area failed: $it") }
         }
 
+        // 可见小横条长度跟随触摸区域：以顶部为轴纵向拉伸，
+        // 方向与 cover view 窗口「y 不动、height 向下长」一致。
+        if (handle != null) {
+            val scale = scaleFactor()
+            runCatching {
+                handle.pivotY = 0f
+                handle.scaleY = if (scale > 1) scale.toFloat() else 1f
+                log(module, "handle bar scaleY=${handle.scaleY}")
+            }.onFailure { logWarn(module, "stretch handle failed: $it") }
+        }
+
         // 触摸转发
         if (cover != null && handle != null && touchWrapped[wrapper] != true) {
             installTouchForwarding(module, wrapper, cover, handle)
@@ -243,7 +254,7 @@ object SidebarHandleHook : BaseHook() {
                 val image = handle as? ImageView
                 if (image != null && saved != null && image.drawable !== saved) {
                     image.setImageDrawable(saved)
-                    log(module, "handle bar shown")
+                    logMsg("handle bar shown")
                 }
             }
             if (resetTimer) resetIdleTimer(wrapper)
@@ -279,7 +290,7 @@ object SidebarHandleHook : BaseHook() {
         val image = handle as? ImageView ?: return
         if (image.drawable != null) {
             image.setImageDrawable(null)
-            log(module, "handle bar hidden after ${IDLE_HIDE_MS}ms idle")
+            logMsg("handle bar hidden after ${IDLE_HIDE_MS}ms idle")
         }
     }
 
@@ -317,6 +328,11 @@ object SidebarHandleHook : BaseHook() {
         }
         touchWrapped[wrapper] = true
         log(module, "cover touch forwarding installed")
+    }
+
+    /** 主线程任务里没有 module 参数时的日志出口。 */
+    private fun logMsg(message: String) {
+        module?.let { log(it, message) }
     }
 
     private fun idleHideEnabled(): Boolean =
