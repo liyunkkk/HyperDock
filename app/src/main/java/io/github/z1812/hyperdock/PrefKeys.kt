@@ -42,10 +42,11 @@ object PrefKeys {
     const val SIDEBAR_AUTO_CLOSE_MODE = "sidebar_auto_close_mode"
 
     /**
-     * 收起态是否隐藏小横条（原生 `RegionSamplingImageView` 的可见黑条）。
-     * 只置空它的 drawable，不改布局尺寸，不影响原生拖拽判定。
+     * 收起态小横条闲置自动隐藏：平时照常显示，若干秒没有触摸就隐藏，
+     * 再次触摸侧边栏或小横条立刻恢复。只置空/塞回它的 drawable，
+     * 不改布局尺寸，不影响原生拖拽判定。
      */
-    const val SIDEBAR_HANDLE_HIDDEN = "sidebar_handle_hidden"
+    const val SIDEBAR_HANDLE_IDLE_HIDE = "sidebar_handle_idle_hide"
 
     /**
      * 小横条触摸面积加长倍数。收起态可拖拽区域 = cover view 窗口高度 × 本倍率，
@@ -118,7 +119,7 @@ object PrefKeys {
         SIDEBAR_TWO_COLUMNS,
         SIDEBAR_QUICK_SLOT,
         SIDEBAR_AUTO_CLOSE_MODE,
-        SIDEBAR_HANDLE_HIDDEN,
+        SIDEBAR_HANDLE_IDLE_HIDE,
         SIDEBAR_TOUCH_SCALE,
     )
 
@@ -140,7 +141,7 @@ object PrefKeys {
         SIDEBAR_TWO_COLUMNS,
         SIDEBAR_QUICK_SLOT,
         SIDEBAR_AUTO_CLOSE_MODE,
-        SIDEBAR_HANDLE_HIDDEN,
+        SIDEBAR_HANDLE_IDLE_HIDE,
         SIDEBAR_TOUCH_SCALE,
         ALL_APPS_CUSTOM_ENABLED,
         ALL_APPS_CUSTOM_MODE,

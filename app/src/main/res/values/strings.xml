@@ -74,8 +74,8 @@
     <string name="sidebar_auto_close_shortcuts">Built-in shortcuts only</string>
     <string name="sidebar_auto_close_quick_launch">Quick launch only</string>
     <string name="sidebar_auto_close_all">Every scenario</string>
-    <string name="sidebar_handle_hidden">Hide handle bar</string>
-    <string name="sidebar_handle_hidden_summary">Hide the bar shown when the sidebar is collapsed; dragging still works across the touch area</string>
+    <string name="sidebar_handle_idle_hide">Auto-hide handle bar when idle</string>
+    <string name="sidebar_handle_idle_hide_summary">The bar stays visible and hides itself after a few seconds without touch; touching the sidebar brings it back</string>
     <string name="sidebar_touch_scale">Handle touch area</string>
     <string name="sidebar_touch_scale_summary">How much longer the draggable area is than the native bar</string>
     <string name="sidebar_touch_scale_off">Native</string>

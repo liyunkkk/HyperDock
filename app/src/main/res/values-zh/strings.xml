@@ -71,8 +71,8 @@
     <string name="sidebar_auto_close_shortcuts">仅内置快捷方式</string>
     <string name="sidebar_auto_close_quick_launch">仅快速启动</string>
     <string name="sidebar_auto_close_all">所有场景</string>
-    <string name="sidebar_handle_hidden">隐藏小横条</string>
-    <string name="sidebar_handle_hidden_summary">收起态不显示小横条，仍可在触摸区域内拖动</string>
+    <string name="sidebar_handle_idle_hide">闲置自动隐藏小横条</string>
+    <string name="sidebar_handle_idle_hide_summary">小横条默认显示，几秒没有触摸后自动隐藏，触摸侧边栏或小横条即恢复</string>
     <string name="sidebar_touch_scale">小横条触摸面积</string>
     <string name="sidebar_touch_scale_summary">可拖拽区域比原生小横条加长多少</string>
     <string name="sidebar_touch_scale_off">原生</string>
