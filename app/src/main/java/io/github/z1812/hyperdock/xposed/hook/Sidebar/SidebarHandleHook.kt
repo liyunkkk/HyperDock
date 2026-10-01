@@ -105,6 +105,7 @@ object SidebarHandleHook : BaseHook() {
     override fun onInit(module: XposedModule, param: PackageLoadedParam) {
         this.module = module
         val processName = runCatching { Application.getProcessName() }.getOrNull().orEmpty()
+        HdDebug.log(TAG, "onInit start: pkg=" + param.packageName + " proc=" + processName)
         if (!isUiProcess(param.packageName, processName)) {
             log(module, "skip non-UI process: $processName")
             return
@@ -112,11 +113,17 @@ object SidebarHandleHook : BaseHook() {
 
         val loader = param.defaultClassLoader
         val openMethod = SidebarExpandDexDiscovery.findOpenMethod(loader)
-        if (openMethod == null) {
+        HdDebug.log(TAG, "openMethod=" + openMethod)
+        // DexKit 发现失败也要能用：宿主里 SidebarWrapper 就是 com.miui.dock.sidebar.p，
+        // 直接按类名兜底（拿不到 open 方法就只挂构造函数）。
+        val wrapperClass = openMethod?.parameterTypes?.getOrNull(0)
+            ?: runCatching { Class.forName("com.miui.dock.sidebar.p", false, loader) }.getOrNull()
+        if (wrapperClass == null) {
+            HdDebug.log(TAG, "wrapper class unavailable; handle hook disabled")
             logWarn(module, "normal sidebar open method unavailable")
             return
         }
-        val wrapperClass = openMethod.parameterTypes[0]
+        HdDebug.log(TAG, "wrapper=" + wrapperClass.name + " viaOpenMethod=" + (openMethod != null))
         val handleClass = runCatching { Class.forName(HANDLE_CLASS, false, loader) }.getOrNull()
         if (handleClass == null) {
             logWarn(module, "handle view class not found")
@@ -155,6 +162,10 @@ object SidebarHandleHook : BaseHook() {
         }
 
         // 每次侧边栏打开时再应用一次：此时窗口参数已由宿主建好。
+        if (openMethod == null) {
+            HdDebug.log(TAG, "open method 缺失，只在构造时应用")
+            return
+        }
         openMethod.isAccessible = true
         module.hook(openMethod).intercept { chain ->
             val result = chain.proceed()

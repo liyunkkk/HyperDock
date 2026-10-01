@@ -53,8 +53,10 @@ object SidebarAppLaunchHook : BaseHook() {
 
     override fun onInit(module: XposedModule, param: PackageLoadedParam) {
         val processName = runCatching { Application.getProcessName() }.getOrNull().orEmpty()
+        HdDebug.log(TAG, "onInit start: pkg=" + param.packageName + " proc=" + processName)
         if (!isUiProcess(param.packageName, processName)) {
             log(module, "skip non-UI process: $processName")
+            HdDebug.log(TAG, "skip non-UI process")
             return
         }
         val loader = param.defaultClassLoader
