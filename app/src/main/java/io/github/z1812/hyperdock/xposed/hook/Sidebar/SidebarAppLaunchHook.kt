@@ -42,6 +42,7 @@ object SidebarAppLaunchHook : BaseHook() {
     @Volatile private var smallWindowLaunch: Method? = null
     @Volatile private var menuHooked = false
     @Volatile private var launcherInstance: Any? = null
+    @Volatile private var freeformLaunch: Method? = null
 
     /** 菜单项自己走小窗时，别被「默认全屏」那条拦截又改成全屏。 */
     @Volatile private var bypassFullscreen = false
@@ -88,6 +89,7 @@ object SidebarAppLaunchHook : BaseHook() {
             return
         }
         freeform.isAccessible = true
+        freeformLaunch = freeform
         launcherInstance = runCatching {
             launcher.getDeclaredMethod("y").invoke(null)
         }.getOrNull()
@@ -210,8 +212,9 @@ object SidebarAppLaunchHook : BaseHook() {
                 val icon = firstImageView(itemView)
                 val launched = runCatching {
                     bypassFullscreen = true
-                    freeform.invoke(launcherInstance, icon, intent, pkg, uid, null)
-                }.isSuccess
+                    freeformLaunch?.invoke(launcherInstance, icon, intent, pkg, uid, null)
+                    true
+                }.getOrDefault(false)
                 bypassFullscreen = false
                 HdDebug.log(TAG, "menu click: freeform launch=$launched pkg=$pkg icon=${icon != null}")
                 null
