@@ -865,12 +865,18 @@ internal object SidebarShortcutController {
             .split(',')
             .filter { it.isNotBlank() }
         val ordered = SidebarShortcutCatalog.orderIds(added, customOrder)
-        val dividerIndex = filtered.indexOfFirst { isDividerModel(it) }
-        val nativeAllApps = if (dividerIndex >= 0) filtered.take(dividerIndex) else filtered
-        // Divider is a layout separator, not part of either native section.
-        // Keep it out of the section payload so reordering cannot move it with
-        // one particular section; it is inserted between rendered sections below.
-        val nativeQuickFunctions = if (dividerIndex >= 0) filtered.drop(dividerIndex + 1) else emptyList()
+        // 宿主把面板切成若干组，用 Model.b 单例分隔。这里按「全部分隔符」切组，
+        // 再把「快捷功能」那一组单独摘出来，其余组都归到「全部应用」。
+        //
+        // 旧实现只认第一个分隔符（前 = 全部应用、后 = 快捷功能），在新宿主上会出事：
+        // 新版面板是 [推荐应用][分隔符][全部应用]，第一组只是推荐应用，全部应用整段
+        // 落在分隔符之后；只要「快捷功能」开关是关的，全部应用就会被一起丢掉。
+        // 分隔符本身是布局用的，不进 section 负载，统一在渲染时插入。
+        val nativeGroups = splitNativeGroups(filtered)
+        val quickFunctionsIndex = nativeGroups.indexOfFirst { isQuickFunctionsGroup(it) }
+        val nativeAllApps = nativeGroups.filterIndexed { index, _ -> index != quickFunctionsIndex }.flatten()
+        val nativeQuickFunctions =
+            if (quickFunctionsIndex >= 0) nativeGroups[quickFunctionsIndex] else emptyList()
         val hasSectionConfig = ConfigManager.contains(PrefKeys.SIDEBAR_SECTION_CONFIGURED)
         if (!hasSectionConfig && quickFunctions.isEmpty() && ordered.isEmpty()) {
             injectedPrefixSize = 0
@@ -1027,6 +1033,35 @@ internal object SidebarShortcutController {
     }
 
     private fun isDividerModel(item: Any): Boolean = dividerModel?.javaClass == item.javaClass
+
+    /** 按宿主的分隔符把原生面板列表切成组（分隔符本身不进组）。 */
+    private fun splitNativeGroups(items: List<Any>): List<List<Any>> {
+        if (dividerModel == null) return listOf(items)
+        val groups = ArrayList<ArrayList<Any>>()
+        var current = ArrayList<Any>()
+        items.forEach { item ->
+            if (isDividerModel(item)) {
+                if (current.isNotEmpty()) groups.add(current)
+                current = ArrayList()
+            } else {
+                current.add(item)
+            }
+        }
+        if (current.isNotEmpty()) groups.add(current)
+        return groups
+    }
+
+    /**
+     * 这一组是不是宿主的「快捷功能」。只看组标题（宿主标题模型带 resolvedText）：
+     * 中文「快捷功能」或英文 “Quick functions”。读不到标题时一律不算，
+     * 这样新版宿主（推荐应用 / 全部应用）两组都会归到「全部应用」，不会再被丢掉。
+     */
+    private fun isQuickFunctionsGroup(group: List<Any>): Boolean {
+        val title = group.firstOrNull()?.let { readTitleResolvedText(it) } ?: return false
+        if (title.isBlank()) return false
+        val lower = title.lowercase()
+        return title.contains("快捷功能") || lower.contains("quick function")
+    }
 
     private fun buildTitle(styleRes: Int, title: String): Any? {
         val ctor = titleCtor ?: return null

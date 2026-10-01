@@ -55,6 +55,9 @@ object SidebarHandleHook : BaseHook() {
     /** wrapper 实例 -> 首次见到的窗口高度。 */
     private val baseHeights = Collections.synchronizedMap(WeakHashMap<Any, Int>())
 
+    /** wrapper 实例 -> 原生小横条的 drawable，关掉「隐藏」时要还原回去。 */
+    private val originalDrawables = Collections.synchronizedMap(WeakHashMap<Any, android.graphics.drawable.Drawable>())
+
     /** wrapper 实例 -> 是否已经包过触摸转发。 */
     private val touchWrapped = Collections.synchronizedMap(WeakHashMap<Any, Boolean>())
 
@@ -164,7 +167,23 @@ object SidebarHandleHook : BaseHook() {
             val cover = coverAccessor?.invoke(wrapper) as? View
             val handle = handleAccessor?.invoke(wrapper) as? View
 
-            if (hide && handle is ImageView) handle.setImageDrawable(null)
+            if (handle is ImageView) {
+                // 隐藏：只置空 drawable。关掉开关时把原生 drawable 还回去，
+                // 否则要等 :ui 重启、宿主重建 wrapper 才会重新出现。
+                if (hide) {
+                    handle.drawable?.let { originalDrawables.putIfAbsent(wrapper, it) }
+                    handle.setImageDrawable(null)
+                } else {
+                    val original = originalDrawables[wrapper]
+                    if (original != null && handle.drawable == null) handle.setImageDrawable(original)
+                }
+            }
+            if (handle is View) {
+                // 让可见小横条的长度等于触摸区域：以顶部为轴纵向拉伸，
+                // 与 cover view 窗口「y 不动、height 向下长」的方向一致。
+                handle.pivotY = 0f
+                handle.scaleY = if (scale > 1) scale.toFloat() else 1f
+            }
 
             if (cover != null && scale > 1) {
                 val params = cover.layoutParams as? WindowManager.LayoutParams
