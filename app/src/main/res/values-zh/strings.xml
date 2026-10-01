@@ -71,6 +71,14 @@
     <string name="sidebar_auto_close_shortcuts">仅内置快捷方式</string>
     <string name="sidebar_auto_close_quick_launch">仅快速启动</string>
     <string name="sidebar_auto_close_all">所有场景</string>
+    <string name="sidebar_handle_hidden">隐藏小横条</string>
+    <string name="sidebar_handle_hidden_summary">收起态不显示小横条，仍可在触摸区域内拖动</string>
+    <string name="sidebar_touch_scale">小横条触摸面积</string>
+    <string name="sidebar_touch_scale_summary">可拖拽区域比原生小横条加长多少</string>
+    <string name="sidebar_touch_scale_off">原生</string>
+    <string name="sidebar_touch_scale_2">2 倍</string>
+    <string name="sidebar_touch_scale_3">3 倍</string>
+    <string name="sidebar_touch_scale_4">4 倍</string>
     <string name="shortcut_custom_style">样式自定义</string>
     <string name="shortcut_custom_style_summary">自定义快捷方式在关闭与开启状态下的背景和图标颜色</string>
     <string name="shortcut_style_background_off">关闭状态背景</string>

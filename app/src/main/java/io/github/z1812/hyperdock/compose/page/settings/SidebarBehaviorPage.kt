@@ -53,6 +53,16 @@ internal fun SidebarBehaviorPage(
     onOpenQuickSlot: () -> Unit,
 ) {
     val quickSlotLabel = rememberQuickSlotLabel(prefs)
+    val handleHidden = rememberBooleanPreference(prefs, PrefKeys.SIDEBAR_HANDLE_HIDDEN, false)
+    val touchScale = rememberStringPreference(prefs, PrefKeys.SIDEBAR_TOUCH_SCALE, PrefKeys.TOUCH_SCALE_OFF)
+    val touchScaleLabels = remember {
+        listOf(
+            PrefKeys.TOUCH_SCALE_OFF to R.string.sidebar_touch_scale_off,
+            PrefKeys.TOUCH_SCALE_2 to R.string.sidebar_touch_scale_2,
+            PrefKeys.TOUCH_SCALE_3 to R.string.sidebar_touch_scale_3,
+            PrefKeys.TOUCH_SCALE_4 to R.string.sidebar_touch_scale_4,
+        )
+    }
     val expandAllApps = rememberBooleanPreference(prefs, PrefKeys.SIDEBAR_EXPAND_ALL_APPS, false)
     val twoColumns = rememberBooleanPreference(prefs, PrefKeys.SIDEBAR_TWO_COLUMNS, false)
     val panelCache = rememberBooleanPreference(prefs, PrefKeys.SIDEBAR_PANEL_CACHE, false)
@@ -209,6 +219,27 @@ internal fun SidebarBehaviorPage(
                     val next = autoCloseLabels.getOrNull(index)?.first ?: PrefKeys.AUTO_CLOSE_ALL
                     autoCloseMode.value = next
                     prefs.putString(PrefKeys.SIDEBAR_AUTO_CLOSE_MODE, next)
+                }
+                PreferenceSwitch(
+                    title = stringResource(R.string.sidebar_handle_hidden),
+                    summary = stringResource(R.string.sidebar_handle_hidden_summary),
+                    icon = null,
+                    checked = handleHidden.value,
+                ) {
+                    handleHidden.value = it
+                    prefs.putBoolean(PrefKeys.SIDEBAR_HANDLE_HIDDEN, it)
+                }
+                PreferenceDropdown(
+                    title = stringResource(R.string.sidebar_touch_scale),
+                    summary = stringResource(R.string.sidebar_touch_scale_summary),
+                    icon = null,
+                    items = touchScaleLabels.map { stringResource(it.second) },
+                    selectedIndex = touchScaleLabels.indexOfFirst { it.first == touchScale.value }
+                        .takeIf { it >= 0 } ?: PrefKeys.TOUCH_SCALE_MODES.indexOf(PrefKeys.TOUCH_SCALE_OFF),
+                ) { index ->
+                    val next = touchScaleLabels.getOrNull(index)?.first ?: PrefKeys.TOUCH_SCALE_OFF
+                    touchScale.value = next
+                    prefs.putString(PrefKeys.SIDEBAR_TOUCH_SCALE, next)
                 }
             }
         }

@@ -41,6 +41,25 @@ object PrefKeys {
      */
     const val SIDEBAR_AUTO_CLOSE_MODE = "sidebar_auto_close_mode"
 
+    /**
+     * 收起态是否隐藏小横条（原生 `RegionSamplingImageView` 的可见黑条）。
+     * 只置空它的 drawable，不改布局尺寸，不影响原生拖拽判定。
+     */
+    const val SIDEBAR_HANDLE_HIDDEN = "sidebar_handle_hidden"
+
+    /**
+     * 小横条触摸面积加长倍数。收起态可拖拽区域 = cover view 窗口高度 × 本倍率，
+     * 取值为 [TOUCH_SCALE_MODES] 里的字符串；`off` = 保持原生。
+     */
+    const val SIDEBAR_TOUCH_SCALE = "sidebar_touch_scale"
+
+    /** [SIDEBAR_TOUCH_SCALE] 的合法取值，顺序与设置页下拉项一致。 */
+    val TOUCH_SCALE_MODES = listOf(TOUCH_SCALE_OFF, TOUCH_SCALE_2, TOUCH_SCALE_3, TOUCH_SCALE_4)
+    const val TOUCH_SCALE_OFF = "off"
+    const val TOUCH_SCALE_2 = "2"
+    const val TOUCH_SCALE_3 = "3"
+    const val TOUCH_SCALE_4 = "4"
+
     /** [SIDEBAR_AUTO_CLOSE_MODE] 的合法取值，顺序与设置页下拉项一致。 */
     val AUTO_CLOSE_MODES = listOf(AUTO_CLOSE_OFF, AUTO_CLOSE_SHORTCUTS, AUTO_CLOSE_QUICK_LAUNCH, AUTO_CLOSE_ALL)
     const val AUTO_CLOSE_OFF = "off"
@@ -99,6 +118,8 @@ object PrefKeys {
         SIDEBAR_TWO_COLUMNS,
         SIDEBAR_QUICK_SLOT,
         SIDEBAR_AUTO_CLOSE_MODE,
+        SIDEBAR_HANDLE_HIDDEN,
+        SIDEBAR_TOUCH_SCALE,
     )
 
     /** 需要同步到 Hook 进程、并参与导入导出的业务配置键。 */
@@ -119,6 +140,8 @@ object PrefKeys {
         SIDEBAR_TWO_COLUMNS,
         SIDEBAR_QUICK_SLOT,
         SIDEBAR_AUTO_CLOSE_MODE,
+        SIDEBAR_HANDLE_HIDDEN,
+        SIDEBAR_TOUCH_SCALE,
         ALL_APPS_CUSTOM_ENABLED,
         ALL_APPS_CUSTOM_MODE,
         ALL_APPS_CUSTOM_PACKAGES,

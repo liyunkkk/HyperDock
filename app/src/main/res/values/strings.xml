@@ -74,6 +74,14 @@
     <string name="sidebar_auto_close_shortcuts">Built-in shortcuts only</string>
     <string name="sidebar_auto_close_quick_launch">Quick launch only</string>
     <string name="sidebar_auto_close_all">Every scenario</string>
+    <string name="sidebar_handle_hidden">Hide handle bar</string>
+    <string name="sidebar_handle_hidden_summary">Hide the bar shown when the sidebar is collapsed; dragging still works across the touch area</string>
+    <string name="sidebar_touch_scale">Handle touch area</string>
+    <string name="sidebar_touch_scale_summary">How much longer the draggable area is than the native bar</string>
+    <string name="sidebar_touch_scale_off">Native</string>
+    <string name="sidebar_touch_scale_2">2x</string>
+    <string name="sidebar_touch_scale_3">3x</string>
+    <string name="sidebar_touch_scale_4">4x</string>
     <string name="shortcut_custom_style">Custom style</string>
     <string name="shortcut_custom_style_summary">Customize the background and icon colors for the off and on states</string>
     <string name="shortcut_style_background_off">Off-state background</string>
