@@ -102,6 +102,7 @@ object SidebarDockSlotHook : BaseHook() {
         hookDockHeightList(module, loader)
         hookDetachedSmoothScroll(module, loader)
         hookFreeformFilter(module, loader)
+        hookPanelTitles(module, loader)
         // 注意：**不要**再往宿主自己的数据列表（z7.u.f()）里塞条目。
         // 宿主的「刷新列表」路径会遍历它，塞进去会让它在侧边栏已关闭时走
         // smoothScrollToPosition 分支 → RecyclerView 已 detach → NPE 闪退
@@ -694,10 +695,8 @@ object SidebarDockSlotHook : BaseHook() {
         val context = itemView.context ?: return
         resolveResources(context)
         if (SidebarDockState.isDividerPosition(position)) {
-            val divider = itemView.findViewById<View>(dividerResId) ?: return
-            divider.visibility = View.VISIBLE
-            applyDividerWidth(divider, context)
-            log(module, "divider bound at $position width=${divider.layoutParams?.width}")
+            applyGlassDivider(itemView)
+            HdDebug.log(TAG, "divider bound at position=" + position)
             return
         }
         // ViewHolder 是复用的：我们注入的分割线条目会把图标藏掉、把线显示出来，
@@ -1069,20 +1068,25 @@ object SidebarDockSlotHook : BaseHook() {
 
     private fun bindRecentDivider(holder: Any?) {
         val itemView = findItemView(holder) ?: return
+        applyGlassDivider(itemView)
+    }
+
+    /**
+     * 给分割线那一行上样式：宿主自己的 `a8.b` 条目走的是宿主的 bind，
+     * 我写的这套（加粗加深 + 两端留白）必须在这里也补一次，否则看到的还是宿主那条细浅线。
+     */
+    private fun applyGlassDivider(itemView: View) {
         val context = itemView.context ?: return
         resolveResources(context)
         itemView.visibility = View.VISIBLE
-        // 图标不用 GONE（会被复用到应用行上），清掉图片即可。
         val icon = itemView.findViewById<View>(iconResId) as? ImageView
         icon?.visibility = View.VISIBLE
         icon?.setImageDrawable(null)
-        val placeholder = itemView.findViewById<View>(placeholderResId)
-        placeholder?.visibility = View.GONE
+        itemView.findViewById<View>(placeholderResId)?.visibility = View.GONE
         val divider = if (dividerResId != 0) itemView.findViewById<View>(dividerResId) else null
         if (divider == null) {
-            // 兜底：宿主布局里没有分割线 view 时自己画一条（当前版本实测有，走不到这里）。
             itemView.foreground = LiquidGlassLineDrawable(lineHeight(itemView))
-            HdDebug.log(TAG, "divider bind: 无宿主 view，用 foreground 自绘")
+            HdDebug.log(TAG, "divider: 无宿主 view，用 foreground 自绘")
             return
         }
         divider.visibility = View.VISIBLE
@@ -1100,11 +1104,7 @@ object SidebarDockSlotHook : BaseHook() {
             divider.layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, height)
         }
         divider.background = LiquidGlassLineDrawable(height)
-        HdDebug.log(
-            TAG,
-            "divider bind: inset=$inset height=$height cellWidth=" + itemView.width +
-                " dividerWidth=" + divider.width,
-        )
+        HdDebug.log(TAG, "divider styled: inset=" + inset + " height=" + height + " w=" + itemView.width)
     }
 
     private fun lineHeight(view: View): Int {
@@ -1336,6 +1336,32 @@ object SidebarDockSlotHook : BaseHook() {
         val target = item ?: return "null"
         val pkg = describePackage(target)
         return if (pkg.isNullOrBlank()) target.javaClass.simpleName else target.javaClass.simpleName + ":" + pkg
+    }
+
+    /**
+     * 探针：宿主的「分组标题」模型 `com.miui.dock.allapps.Model$Title`。
+     * 面板的分组（推荐应用 / 全部小窗应用）就是用它造标题的，构造参数里带字符串资源 id：
+     * 2131886857 = 全部小窗应用，另一个就是推荐应用。用来确认该怎么把推荐那一组去掉。
+     */
+    private fun hookPanelTitles(module: XposedModule, loader: ClassLoader) {
+        val titleClass = runCatching {
+            Class.forName("com.miui.dock.allapps.Model\$Title", false, loader)
+        }.getOrNull()
+        if (titleClass == null) {
+            HdDebug.log(TAG, "panel title class not found")
+            return
+        }
+        titleClass.declaredConstructors.forEach { ctor ->
+            ctor.isAccessible = true
+            runCatching {
+                module.hook(ctor).intercept { chain ->
+                    val id = chain.args.firstOrNull { it is Int } as? Int
+                    HdDebug.log(TAG, "panel title resId=" + id + " args=" + chain.args.size)
+                    chain.proceed()
+                }
+            }
+        }
+        HdDebug.log(TAG, "panel title probe installed on " + titleClass.name)
     }
 
     /** 侧边栏网格（RecyclerView）。 */
