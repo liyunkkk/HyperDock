@@ -3,6 +3,7 @@ package io.github.z1812.hyperdock.xposed
 import io.github.z1812.hyperdock.xposed.hook.Sidebar.SidebarCloseHook
 import io.github.z1812.hyperdock.xposed.hook.Sidebar.SidebarColumnsHook
 import io.github.z1812.hyperdock.xposed.hook.Sidebar.SidebarDockSlotHook
+import io.github.z1812.hyperdock.xposed.hook.Sidebar.SidebarAppLaunchHook
 import io.github.z1812.hyperdock.xposed.hook.Sidebar.SidebarHandleHook
 import io.github.z1812.hyperdock.xposed.hook.Sidebar.SidebarDefaultExpandHook
 import io.github.z1812.hyperdock.xposed.hook.Sidebar.SidebarShortcutHook
@@ -40,6 +41,7 @@ class HyperDockModule : XposedModule() {
                 SidebarDockSlotHook.init(this, param)
                 SidebarShorthandHook.init(this, param)
                 SidebarHandleHook.init(this, param)
+                SidebarAppLaunchHook.init(this, param)
             }
             "com.android.systemui" -> {
                 SidebarQsBridgeHook.init(this, param)

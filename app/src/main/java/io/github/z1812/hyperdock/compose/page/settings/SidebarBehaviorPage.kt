@@ -55,6 +55,15 @@ internal fun SidebarBehaviorPage(
     val quickSlotLabel = rememberQuickSlotLabel(prefs)
     val handleIdleHide = rememberBooleanPreference(prefs, PrefKeys.SIDEBAR_HANDLE_IDLE_HIDE, true)
     val touchScale = rememberStringPreference(prefs, PrefKeys.SIDEBAR_TOUCH_SCALE, PrefKeys.TOUCH_SCALE_OFF)
+    val appOpenMode = rememberStringPreference(prefs, PrefKeys.SIDEBAR_APP_OPEN_MODE, PrefKeys.APP_OPEN_FULLSCREEN)
+    val recentApps = rememberBooleanPreference(prefs, PrefKeys.SIDEBAR_RECENT_APPS, true)
+    val recentCount = rememberStringPreference(prefs, PrefKeys.SIDEBAR_RECENT_COUNT, PrefKeys.RECENT_COUNT_DEFAULT)
+    val appOpenLabels = remember {
+        listOf(
+            PrefKeys.APP_OPEN_FULLSCREEN to R.string.sidebar_app_open_fullscreen,
+            PrefKeys.APP_OPEN_SMALL_WINDOW to R.string.sidebar_app_open_small_window,
+        )
+    }
     val touchScaleLabels = remember {
         listOf(
             PrefKeys.TOUCH_SCALE_OFF to R.string.sidebar_touch_scale_off,
@@ -228,6 +237,39 @@ internal fun SidebarBehaviorPage(
                 ) {
                     handleIdleHide.value = it
                     prefs.putBoolean(PrefKeys.SIDEBAR_HANDLE_IDLE_HIDE, it)
+                }
+                PreferenceDropdown(
+                    title = stringResource(R.string.sidebar_app_open_mode),
+                    summary = stringResource(R.string.sidebar_app_open_mode_summary),
+                    icon = null,
+                    items = appOpenLabels.map { stringResource(it.second) },
+                    selectedIndex = appOpenLabels.indexOfFirst { it.first == appOpenMode.value }
+                        .takeIf { it >= 0 } ?: PrefKeys.APP_OPEN_MODES.indexOf(PrefKeys.APP_OPEN_FULLSCREEN),
+                ) { index ->
+                    val next = appOpenLabels.getOrNull(index)?.first ?: PrefKeys.APP_OPEN_FULLSCREEN
+                    appOpenMode.value = next
+                    prefs.putString(PrefKeys.SIDEBAR_APP_OPEN_MODE, next)
+                }
+                PreferenceSwitch(
+                    title = stringResource(R.string.sidebar_recent_apps),
+                    summary = stringResource(R.string.sidebar_recent_apps_summary),
+                    icon = null,
+                    checked = recentApps.value,
+                ) {
+                    recentApps.value = it
+                    prefs.putBoolean(PrefKeys.SIDEBAR_RECENT_APPS, it)
+                }
+                PreferenceDropdown(
+                    title = stringResource(R.string.sidebar_recent_count),
+                    summary = stringResource(R.string.sidebar_recent_count_summary),
+                    icon = null,
+                    items = PrefKeys.RECENT_COUNT_MODES.map { stringResource(R.string.sidebar_recent_count_value, it) },
+                    selectedIndex = PrefKeys.RECENT_COUNT_MODES.indexOf(recentCount.value)
+                        .takeIf { it >= 0 } ?: PrefKeys.RECENT_COUNT_MODES.indexOf(PrefKeys.RECENT_COUNT_DEFAULT),
+                ) { index ->
+                    val next = PrefKeys.RECENT_COUNT_MODES.getOrNull(index) ?: PrefKeys.RECENT_COUNT_DEFAULT
+                    recentCount.value = next
+                    prefs.putString(PrefKeys.SIDEBAR_RECENT_COUNT, next)
                 }
                 PreferenceDropdown(
                     title = stringResource(R.string.sidebar_touch_scale),

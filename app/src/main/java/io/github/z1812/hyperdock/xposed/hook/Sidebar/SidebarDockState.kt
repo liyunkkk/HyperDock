@@ -24,6 +24,12 @@ internal object SidebarDockState {
     /** 「速记旁边的图标」的条目实例；未配置时为 null。 */
     @Volatile var slotItem: Any? = null
 
+    /** 注入的「最近打开应用」条目（顺序即显示顺序）。 */
+    @Volatile var recentItems: List<Any> = emptyList()
+
+    /** 注入的「最近应用」与常用应用之间的那条分割线。 */
+    @Volatile var recentDivider: Any? = null
+
     /** 最近一次提交给 adapter 的（已注入的）列表，供 SpanSizeLookup 查询。 */
     @Volatile var displayList: List<Any> = emptyList()
 
@@ -41,7 +47,9 @@ internal object SidebarDockState {
      */
     fun isDividerPosition(position: Int): Boolean {
         if (dividerClass == null) return false
-        return position == dividerIndex()
+        if (position == dividerIndex()) return true
+        val extra = recentDivider ?: return false
+        return displayList.getOrNull(position) === extra
     }
 
     /**

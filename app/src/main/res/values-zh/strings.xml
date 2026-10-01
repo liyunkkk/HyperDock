@@ -73,6 +73,16 @@
     <string name="sidebar_auto_close_all">所有场景</string>
     <string name="sidebar_handle_idle_hide">闲置自动隐藏小横条</string>
     <string name="sidebar_handle_idle_hide_summary">小横条默认显示，几秒没有触摸后自动隐藏，触摸侧边栏或小横条即恢复</string>
+    <string name="sidebar_app_open_mode">点击应用打开方式</string>
+    <string name="sidebar_app_open_mode_summary">侧边栏条目的默认打开方式；长按菜单里显示另一种，外加分屏</string>
+    <string name="sidebar_app_open_fullscreen">全屏</string>
+    <string name="sidebar_app_open_small_window">小窗</string>
+    <string name="sidebar_open_small_window">小窗</string>
+    <string name="sidebar_recent_apps">最近打开应用</string>
+    <string name="sidebar_recent_apps_summary">在常用应用上方显示一组最近打开过的应用</string>
+    <string name="sidebar_recent_count">最近应用数量</string>
+    <string name="sidebar_recent_count_summary">显示多少个最近打开的应用</string>
+    <string name="sidebar_recent_count_value">%1$s 个</string>
     <string name="sidebar_touch_scale">小横条触摸面积</string>
     <string name="sidebar_touch_scale_summary">可拖拽区域比原生小横条加长多少</string>
     <string name="sidebar_touch_scale_off">原生</string>

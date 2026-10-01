@@ -454,11 +454,15 @@ object SidebarDockSlotHook : BaseHook() {
         }
     }
 
-    /** 把上次注入的条目从宿主传回来的列表里剔除，保证每次最多只有一个槽位。 */
+    /** 把上次注入的条目从宿主传回来的列表里剔除，保证每组最多只注入一份。 */
     private fun strip(list: List<Any>): List<Any> {
-        val existing = slotItem ?: return list
-        if (list.none { it === existing }) return list
-        return ArrayList<Any>(list.filter { it !== existing })
+        val ours = HashSet<Any>()
+        slotItem?.let { ours.add(it) }
+        ours.addAll(recentItemByPackage.values)
+        recentDividerItem?.let { ours.add(it) }
+        if (ours.isEmpty()) return list
+        if (list.none { ours.contains(it) }) return list
+        return ArrayList<Any>(list.filter { !ours.contains(it) })
     }
 
     /** 逐位比较引用：内容一致说明这次提交不会改变行结构，可以复用上次的列表实例。 */
@@ -476,7 +480,10 @@ object SidebarDockSlotHook : BaseHook() {
     @Volatile private var lastSlotId: String = ""
     @Volatile private var lastTwoColumns = false
 
-    private fun inject(module: XposedModule, list: List<Any>): List<Any> {
+    private fun inject(module: XposedModule, list: List<Any>): List<Any> =
+        injectSlot(module, injectRecent(module, list))
+
+    private fun injectSlot(module: XposedModule, list: List<Any>): List<Any> {
         val id = SidebarQuickSlotConfig.current()
         if (id.isBlank() || !twoColumnsEnabled()) {
             SidebarDockState.slotItem = null
@@ -744,6 +751,161 @@ object SidebarDockSlotHook : BaseHook() {
         paddingPx = dimen(DIMEN_ITEM_PADDING)
         resResolved = dividerResId != 0 && iconResId != 0
     }
+
+    // ── 最近打开应用 ─────────────────────────────────────────────────────────
+
+    /** 包名 → 注入条目，保证同一应用每次提交用的是同一个对象（DiffUtil 不会反复换行）。 */
+    private val recentItemByPackage = Collections.synchronizedMap(WeakHashMap<String, Any>())
+
+    /** 自造的「最近应用/常用应用」分割线；即使功能被关掉也要留着，供 strip 识别。 */
+    @Volatile private var recentDividerItem: Any? = null
+
+    private fun recentCount(): Int {
+        val raw = ConfigManager.getString(PrefKeys.SIDEBAR_RECENT_COUNT, PrefKeys.RECENT_COUNT_DEFAULT)
+        return raw.toIntOrNull()?.coerceIn(1, 10) ?: 6
+    }
+
+    private fun clearRecent() {
+        SidebarDockState.recentItems = emptyList()
+        SidebarDockState.recentDivider = null
+    }
+
+    /**
+     * 在宿主分割线之后插一组「最近打开应用」，并在它与常用应用之间再补一条分割线：
+     * `[速记][分割线][最近应用…][分割线][常用应用…]`。
+     */
+    private fun injectRecent(module: XposedModule, list: List<Any>): List<Any> {
+        if (!ConfigManager.getBoolean(PrefKeys.SIDEBAR_RECENT_APPS, true)) {
+            clearRecent()
+            return list
+        }
+        val dividerClass = SidebarDockState.dividerClass ?: return list
+        val dividerIndex = list.indexOfFirst { it.javaClass == dividerClass }
+        if (dividerIndex < 0) return list
+        val context = appContext() ?: return list
+        val entries = SidebarRecentApps.load(context, recentCount(), excludePackages(list))
+        if (entries.isEmpty()) {
+            clearRecent()
+            return list
+        }
+        val items = entries.mapNotNull { entry -> recentItem(module, entry) }
+        if (items.isEmpty()) {
+            clearRecent()
+            return list
+        }
+        val divider = recentDividerItem
+            ?: createProxyItem(module, "hyperdock::recent-divider") { holder -> bindRecentDivider(holder) }
+                ?.also { recentDividerItem = it }
+            ?: return list
+        SidebarDockState.recentDivider = divider
+        SidebarDockState.recentItems = items
+        val out = ArrayList<Any>(list.size + items.size + 1)
+        out.addAll(list.subList(0, dividerIndex + 1))
+        out.addAll(items)
+        out.add(divider)
+        out.addAll(list.subList(dividerIndex + 1, list.size))
+        log(module, "recent injected=${items.size} at=${dividerIndex + 1} size=${out.size}")
+        return out
+    }
+
+    /** 常用应用已经占了的包名，最近应用里要去掉。 */
+    private fun excludePackages(list: List<Any>): Set<String> {
+        val out = HashSet<String>()
+        list.forEach { item ->
+            val pkg = runCatching {
+                item.javaClass.getMethod("getPackageName").invoke(item) as? String
+            }.getOrNull()
+            if (!pkg.isNullOrBlank()) out.add(pkg)
+        }
+        return out
+    }
+
+    private fun recentItem(module: XposedModule, entry: SidebarRecentApps.Entry): Any? {
+        recentItemByPackage[entry.pkg]?.let { return it }
+        val item = createProxyItem(module, "hyperdock::recent::" + entry.pkg) { holder ->
+            bindRecent(module, holder, entry)
+        } ?: return null
+        recentItemByPackage[entry.pkg] = item
+        return item
+    }
+
+    /** 和速记旁的槽位一样，用动态代理实现宿主的条目接口。 */
+    private fun createProxyItem(module: XposedModule, tag: String, onBind: (Any?) -> Unit): Any? {
+        val iface = itemInterface ?: return null
+        val loader = iface.classLoader ?: return null
+        val ref = arrayOfNulls<Any>(1)
+        val handler = InvocationHandler { _, method, args ->
+            when {
+                method.name == "e" && method.parameterCount == 1 -> {
+                    onBind(args?.firstOrNull())
+                    null
+                }
+                method.name == "c" && method.parameterCount == 1 -> null
+                method.name == "equals" -> ref[0] === args?.firstOrNull()
+                method.name == "hashCode" -> System.identityHashCode(ref[0])
+                method.name == "toString" -> tag
+                else -> defaultValue(method.returnType)
+            }
+        }
+        val proxy = runCatching { Proxy.newProxyInstance(loader, arrayOf<Class<*>>(iface), handler) }
+            .onFailure { logWarn(module, "$tag proxy failed: ${it.message}") }
+            .getOrNull() ?: return null
+        ref[0] = proxy
+        return proxy
+    }
+
+    private fun bindRecent(module: XposedModule, holder: Any?, entry: SidebarRecentApps.Entry) {
+        val itemView = findItemView(holder) ?: return
+        val context = itemView.context ?: return
+        resolveResources(context)
+        applyRecentAppearance(itemView, entry.icon)
+        // 宿主 bind 之后还会改写这些 view，延后一帧再整体覆盖一次。
+        itemView.post {
+            applyRecentAppearance(itemView, entry.icon)
+            val id = "app:" + entry.pkg
+            val listener = View.OnClickListener {
+                val launched = runCatching { SidebarShortcutController.launchById(context, id) }
+                    .getOrDefault(false)
+                if (launched) runCatching { SidebarCloseHook.closeSidebar() }
+            }
+            itemView.setOnClickListener(listener)
+            itemView.findViewById<View>(iconResId)?.setOnClickListener(listener)
+        }
+    }
+
+    private fun applyRecentAppearance(itemView: View, icon: Drawable?) {
+        itemView.visibility = View.VISIBLE
+        itemView.findViewById<View>(dividerResId)?.visibility = View.GONE
+        itemView.findViewById<View>(placeholderResId)?.visibility = View.GONE
+        val image = itemView.findViewById<View>(iconResId) as? ImageView ?: return
+        image.visibility = View.VISIBLE
+        image.setImageDrawable(icon)
+    }
+
+    private fun bindRecentDivider(holder: Any?) {
+        val itemView = findItemView(holder) ?: return
+        val context = itemView.context ?: return
+        resolveResources(context)
+        itemView.visibility = View.VISIBLE
+        itemView.findViewById<View>(iconResId)?.visibility = View.GONE
+        itemView.findViewById<View>(placeholderResId)?.visibility = View.GONE
+        val divider = itemView.findViewById<View>(dividerResId) ?: return
+        divider.visibility = View.VISIBLE
+        val parent = itemView.parent as? View
+        if (parent != null && parent.width > 0) {
+            val params = divider.layoutParams ?: return
+            params.width = (parent.width - paddingPx * 2).coerceAtLeast(0)
+            divider.layoutParams = params
+        }
+    }
+
+    /** 主线程之外拿不到 Activity 时的应用上下文。 */
+    private fun appContext(): Context? = runCatching {
+        val thread = Class.forName("android.app.ActivityThread")
+        val method = thread.getDeclaredMethod("currentApplication")
+        method.isAccessible = true
+        method.invoke(null) as? Context
+    }.getOrNull()
 
     private fun isUiProcess(packageName: String, processName: String): Boolean {
         if (processName.isEmpty()) return true

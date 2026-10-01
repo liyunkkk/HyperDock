@@ -54,6 +54,28 @@ object PrefKeys {
      */
     const val SIDEBAR_TOUCH_SCALE = "sidebar_touch_scale"
 
+    /**
+     * 侧边栏（含全部应用面板）点应用的默认打开方式，取值见 [APP_OPEN_MODES]：
+     * `fullscreen` = 全屏（默认）/ `small_window` = 小窗（原生默认）。
+     * 长按菜单里的「全屏 / 小窗」那一项会跟着反过来。
+     */
+    const val SIDEBAR_APP_OPEN_MODE = "sidebar_app_open_mode"
+
+    /** [SIDEBAR_APP_OPEN_MODE] 的合法取值，顺序与设置页下拉项一致。 */
+    val APP_OPEN_MODES = listOf(APP_OPEN_FULLSCREEN, APP_OPEN_SMALL_WINDOW)
+    const val APP_OPEN_FULLSCREEN = "fullscreen"
+    const val APP_OPEN_SMALL_WINDOW = "small_window"
+
+    /** 是否在常用应用上方显示一组「最近打开应用」。 */
+    const val SIDEBAR_RECENT_APPS = "sidebar_recent_apps"
+
+    /** 「最近打开应用」显示个数，取值为 [RECENT_COUNT_MODES]。 */
+    const val SIDEBAR_RECENT_COUNT = "sidebar_recent_count"
+
+    /** [SIDEBAR_RECENT_COUNT] 的合法取值，顺序与设置页下拉项一致。 */
+    val RECENT_COUNT_MODES = listOf("4", "6", "8")
+    const val RECENT_COUNT_DEFAULT = "6"
+
     /** [SIDEBAR_TOUCH_SCALE] 的合法取值，顺序与设置页下拉项一致。 */
     val TOUCH_SCALE_MODES = listOf(TOUCH_SCALE_OFF, TOUCH_SCALE_2, TOUCH_SCALE_3, TOUCH_SCALE_4)
     const val TOUCH_SCALE_OFF = "off"
@@ -121,6 +143,9 @@ object PrefKeys {
         SIDEBAR_AUTO_CLOSE_MODE,
         SIDEBAR_HANDLE_IDLE_HIDE,
         SIDEBAR_TOUCH_SCALE,
+        SIDEBAR_APP_OPEN_MODE,
+        SIDEBAR_RECENT_APPS,
+        SIDEBAR_RECENT_COUNT,
     )
 
     /** 需要同步到 Hook 进程、并参与导入导出的业务配置键。 */
@@ -143,6 +168,9 @@ object PrefKeys {
         SIDEBAR_AUTO_CLOSE_MODE,
         SIDEBAR_HANDLE_IDLE_HIDE,
         SIDEBAR_TOUCH_SCALE,
+        SIDEBAR_APP_OPEN_MODE,
+        SIDEBAR_RECENT_APPS,
+        SIDEBAR_RECENT_COUNT,
         ALL_APPS_CUSTOM_ENABLED,
         ALL_APPS_CUSTOM_MODE,
         ALL_APPS_CUSTOM_PACKAGES,
