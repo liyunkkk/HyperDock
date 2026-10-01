@@ -1131,6 +1131,48 @@ object SidebarDockSlotHook : BaseHook() {
         }
     }
 
+    /** 侧边栏网格（RecyclerView）。 */
+    private fun dockGridView(): android.view.View? = synchronized(adapterByView) {
+        adapterByView.entries.firstOrNull { it.value === adapterInstance }?.key
+    }
+
+    /** 延时把侧边栏网格里每个子视图的实际位置量出来（判断"多出来的空格"从哪来）。 */
+    private fun dumpGrid(module: XposedModule) {
+        val view = dockGridView() ?: return
+        view.postDelayed({
+            runCatching {
+                val getChildCount = view.javaClass.getMethod("getChildCount")
+                val getChildAt = view.javaClass.getMethod("getChildAt", Int::class.javaPrimitiveType)
+                val getPosition = view.javaClass.getMethod(
+                    "getChildAdapterPosition",
+                    android.view.View::class.java,
+                )
+                val count = getChildCount.invoke(view) as Int
+                val sb = StringBuilder()
+                for (index in 0 until count) {
+                    val child = getChildAt.invoke(view, index) as? android.view.View ?: continue
+                    val position = runCatching {
+                        getPosition.invoke(view, child) as Int
+                    }.getOrDefault(-1)
+                    sb.append("p").append(position)
+                        .append("(x=").append(child.left)
+                        .append(",y=").append(child.top)
+                        .append(",w=").append(child.width)
+                        .append(",h=").append(child.height)
+                        .append(") ")
+                }
+                val lookupNow = runCatching {
+                    view.javaClass.getMethod("getSpanSizeLookup").invoke(view)
+                }.getOrNull()
+                HdDebug.log(
+                    TAG,
+                    "grid children n=" + count + " " + sb +
+                        " lookupOurs=" + (lookupNow != null && lookupNow === SidebarColumnsHook.spanLookupForDebug()),
+                )
+            }
+        }, 900)
+    }
+
     /** 把注入的最近应用/分割线补进宿主返回的列表（已经在里面就不重复加）。 */
     private fun appendInjected(module: XposedModule, list: List<Any>, from: String): List<Any> {
         val extras = ArrayList<Any>(SidebarDockState.recentItems.size + 1)
