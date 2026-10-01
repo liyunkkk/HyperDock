@@ -1059,12 +1059,13 @@ object SidebarDockSlotHook : BaseHook() {
 
     private fun lineHeight(view: View): Int {
         val density = view.resources.displayMetrics.density
-        return (3 * density).toInt().coerceAtLeast(4)
+        return (5 * density).toInt().coerceAtLeast(6)
     }
 
     /**
-     * 液态玻璃质感的分隔线：外层一圈很淡的柔光 + 中间一条更亮的细芯，
-     * 叠在侧边栏的半透明面板上会有玻璃条的感觉（宿主窗口里没法真做背景模糊）。
+     * 液态玻璃质感的分隔线（加粗加深版）：
+     * 外层一圈深色柔光压出边界、中间一条较实的深灰芯、顶边再补一条细高光——
+     * 贴在浅色半透明面板上既清楚又有玻璃感。
      */
     private class LiquidGlassLineDrawable(private val height: Int) : Drawable() {
 
@@ -1079,27 +1080,28 @@ object SidebarDockSlotHook : BaseHook() {
             val bottom = top + height
             val radius = height / 2f
 
-            // 外层柔光
+            // 外层深色柔光：让线在浅色面板上也有边界
             paint.shader = android.graphics.LinearGradient(
                 0f, top, 0f, bottom,
-                intArrayOf(0x00FFFFFF, 0x3DFFFFFF, 0x00FFFFFF),
+                intArrayOf(0x00000000, 0x40000000, 0x00000000),
                 floatArrayOf(0f, 0.5f, 1f),
                 android.graphics.Shader.TileMode.CLAMP,
             )
             rect.set(bounds.left.toFloat(), top, bounds.right.toFloat(), bottom)
             canvas.drawRoundRect(rect, radius, radius, paint)
 
-            // 中间亮芯
+            // 中间深灰芯
             paint.shader = null
-            paint.color = 0x5CFFFFFF
-            val core = (height / 3f).coerceAtLeast(1f)
-            rect.set(
-                bounds.left.toFloat(),
-                centerY - core / 2f,
-                bounds.right.toFloat(),
-                centerY + core / 2f,
-            )
+            paint.color = 0xA0606060.toInt()
+            val core = (height * 0.55f).coerceAtLeast(3f)
+            rect.set(bounds.left.toFloat(), centerY - core / 2f, bounds.right.toFloat(), centerY + core / 2f)
             canvas.drawRoundRect(rect, core / 2f, core / 2f, paint)
+
+            // 顶边高光，做出玻璃的厚度感
+            paint.color = 0x40FFFFFF
+            val highlight = (height * 0.18f).coerceAtLeast(1f)
+            rect.set(bounds.left.toFloat(), top + 1f, bounds.right.toFloat(), top + 1f + highlight)
+            canvas.drawRoundRect(rect, highlight / 2f, highlight / 2f, paint)
         }
 
         override fun setAlpha(alpha: Int) {
