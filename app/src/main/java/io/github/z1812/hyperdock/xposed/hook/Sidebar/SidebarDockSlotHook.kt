@@ -345,6 +345,9 @@ object SidebarDockSlotHook : BaseHook() {
                     "final list n=" + injected.size + " [" +
                         injected.take(16).joinToString(",") { it.javaClass.simpleName } + "]",
                 )
+                runCatching {
+                    SidebarColumnsHook.reassertSpanLookup(dockGridView())
+                }
                 dumpGrid(module)
                 lastInjected = injected
                 SidebarDockState.displayList = injected
@@ -1146,6 +1149,11 @@ object SidebarDockSlotHook : BaseHook() {
         }
     }
 
+    /** 侧边栏网格（RecyclerView）。 */
+    private fun dockGridView(): android.view.View? = synchronized(adapterByView) {
+        adapterByView.entries.firstOrNull { it.value === adapterInstance }?.key
+    }
+
     /** 延时把侧边栏网格里每个子视图的实际位置量出来（判断"多出来的空格"从哪来）。 */
     private fun dumpGrid(module: XposedModule) {
         val view = synchronized(adapterByView) {
@@ -1173,7 +1181,14 @@ object SidebarDockSlotHook : BaseHook() {
                         .append(",h=").append(child.height)
                         .append(") ")
                 }
-                HdDebug.log(TAG, "grid children n=" + count + " " + sb)
+                val lookupNow = runCatching {
+                    view.javaClass.getMethod("getSpanSizeLookup").invoke(view)
+                }.getOrNull()
+                HdDebug.log(
+                    TAG,
+                    "grid children n=" + count + " " + sb +
+                        " lookupOurs=" + (lookupNow != null && lookupNow === SidebarColumnsHook.spanLookupForDebug()),
+                )
             }
         }, 900)
     }

@@ -449,6 +449,25 @@ object SidebarColumnsHook : BaseHook() {
     /** 当前应当生效的列数，供分割线宽度等处查询。 */
     internal fun currentColumns(): Int = desiredColumns()
 
+    /** 调试用：当前我们装上去的占格表实例。 */
+    internal fun spanLookupForDebug(): Any? = spanLookupInstance
+
+    /**
+     * 把我们的占格表重新装到网格上。
+     *
+     * 宿主在某些时机（重建面板、切列数）会再装一遍它自己的 SpanSizeLookup，那之后
+     * 我们算好的占格就被丢掉了 —— 表现就是「第一次/某次布局里分割线不再占整行」。
+     * 每次注入后调用一次，抢回来。
+     */
+    internal fun reassertSpanLookup(grid: Any?) {
+        val instance = spanLookupInstance ?: return
+        val setter = spanLookupSetter ?: return
+        val target = grid ?: return
+        runCatching { setter.invoke(target, instance) }
+            .onSuccess { HdDebug.log("Columns", "span lookup reasserted") }
+            .onFailure { HdDebug.log("Columns", "span lookup reassert failed: $it") }
+    }
+
     /**
      * 目标列数。两个开关在设置页互斥，但导入备份配置可能绕过 UI，
      * 因此这里再兜一层：自动展开面板开着就不认两列。
@@ -528,6 +547,7 @@ object SidebarColumnsHook : BaseHook() {
             log(module, "span lookup hooked ${defaultType.name}.${getSpanSize.name}")
         }
         spanLookupInstance = instance
+        spanLookupSetter = setter
         spanLookupColumns = columns
         runCatching {
             setter.isAccessible = true
