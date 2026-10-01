@@ -100,7 +100,10 @@ object SidebarDockSlotHook : BaseHook() {
             return
         }
         hookDockHeightList(module, loader)
-        hookDockModelList(module, loader)
+        // 注意：**不要**再往宿主自己的数据列表（z7.u.f()）里塞条目。
+        // 宿主的「刷新列表」路径会遍历它，塞进去会让它在侧边栏已关闭时走
+        // smoothScrollToPosition 分支 → RecyclerView 已 detach → NPE 闪退
+        // （dropbox 里 y.q → r0.d → p0.z ← AllAppsEventBus 那条）。
         turboClass = runCatching { Class.forName(TURBO_LAYOUT_CLASS, false, loader) }.getOrNull()
         if (turboClass == null) {
             logWarn(module, "TurboLayout unavailable; dock slot disabled")
@@ -1126,79 +1129,6 @@ object SidebarDockSlotHook : BaseHook() {
             val list = result as? List<Any> ?: return@intercept result
             appendInjected(module, list, "height")
         }
-    }
-
-    /**
-     * 宿主自己的侧边栏列表来自 `z7.u` 的同步方法（`f()`，`p0.G()` 里日志
-     * `NewDock updateDockModelList data size` 用的就是它）。只在 adapter 层注入的话，
-     * 宿主第一次布局仍按它自己那份数据算尺寸，要等重新布局才对——表现就是
-     * 「第一次滑出错位，打开全部面板返回后正常」。所以这里把注入的条目也补进宿主列表。
-     */
-    private fun hookDockModelList(module: XposedModule, loader: ClassLoader) {
-        val heightMethod = findMethodByString(loader, HEIGHT_LIST_LOG)
-        if (heightMethod == null) {
-            HdDebug.log(TAG, "model list owner not found")
-            return
-        }
-        val owner = heightMethod.declaringClass
-        val candidates = owner.declaredMethods.filter { method ->
-            method.parameterCount == 0 &&
-                List::class.java.isAssignableFrom(method.returnType) &&
-                java.lang.reflect.Modifier.isSynchronized(method.modifiers)
-        }
-        HdDebug.log(TAG, "model list owner=" + owner.simpleName + " candidates=" + candidates.joinToString { it.name })
-        candidates.forEach { method ->
-            method.isAccessible = true
-            module.hook(method).intercept { chain ->
-                val result = chain.proceed()
-                val list = result as? List<Any> ?: return@intercept result
-                appendInjected(module, list, method.name)
-            }
-        }
-    }
-
-    /** 侧边栏网格（RecyclerView）。 */
-    private fun dockGridView(): android.view.View? = synchronized(adapterByView) {
-        adapterByView.entries.firstOrNull { it.value === adapterInstance }?.key
-    }
-
-    /** 延时把侧边栏网格里每个子视图的实际位置量出来（判断"多出来的空格"从哪来）。 */
-    private fun dumpGrid(module: XposedModule) {
-        val view = synchronized(adapterByView) {
-            adapterByView.entries.firstOrNull { it.value === adapterInstance }?.key
-        } ?: return
-        view.postDelayed({
-            runCatching {
-                val getChildCount = view.javaClass.getMethod("getChildCount")
-                val getChildAt = view.javaClass.getMethod("getChildAt", Int::class.javaPrimitiveType)
-                val getPosition = view.javaClass.getMethod(
-                    "getChildAdapterPosition",
-                    android.view.View::class.java,
-                )
-                val count = getChildCount.invoke(view) as Int
-                val sb = StringBuilder()
-                for (index in 0 until count) {
-                    val child = getChildAt.invoke(view, index) as? android.view.View ?: continue
-                    val position = runCatching {
-                        getPosition.invoke(view, child) as Int
-                    }.getOrDefault(-1)
-                    sb.append("p").append(position)
-                        .append("(x=").append(child.left)
-                        .append(",y=").append(child.top)
-                        .append(",w=").append(child.width)
-                        .append(",h=").append(child.height)
-                        .append(") ")
-                }
-                val lookupNow = runCatching {
-                    view.javaClass.getMethod("getSpanSizeLookup").invoke(view)
-                }.getOrNull()
-                HdDebug.log(
-                    TAG,
-                    "grid children n=" + count + " " + sb +
-                        " lookupOurs=" + (lookupNow != null && lookupNow === SidebarColumnsHook.spanLookupForDebug()),
-                )
-            }
-        }, 900)
     }
 
     /** 把注入的最近应用/分割线补进宿主返回的列表（已经在里面就不重复加）。 */
