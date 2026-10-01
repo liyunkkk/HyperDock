@@ -644,14 +644,31 @@ object SidebarDockSlotHook : BaseHook() {
      * 就会把应用行当成分割线，最后变成"分割线下面第一个应用独占一行居中"。
      */
     private fun afterBind(module: XposedModule, holder: Any, position: Int) {
-        if (!SidebarDockState.isDividerPosition(position)) return
         val itemView = findItemView(holder) ?: return
         val context = itemView.context ?: return
         resolveResources(context)
-        val divider = itemView.findViewById<View>(dividerResId) ?: return
-        divider.visibility = View.VISIBLE
-        applyDividerWidth(divider, context)
-        log(module, "divider bound at $position width=${divider.layoutParams?.width}")
+        if (SidebarDockState.isDividerPosition(position)) {
+            val divider = itemView.findViewById<View>(dividerResId) ?: return
+            divider.visibility = View.VISIBLE
+            applyDividerWidth(divider, context)
+            log(module, "divider bound at $position width=${divider.layoutParams?.width}")
+            return
+        }
+        // ViewHolder 是复用的：我们注入的分割线条目会把图标藏掉、把线显示出来，
+        // 而这个 holder 回收给普通应用行时宿主既不重置图标可见性、也从不主动 hide 线，
+        // 于是第一屏会「空位 + 串线」，重新布局换一批 holder 才正常。这里统一清干净。
+        val divider = itemView.findViewById<View>(dividerResId)
+        val icon = itemView.findViewById<View>(iconResId)
+        var cleaned = false
+        if (divider != null && divider.visibility != View.GONE) {
+            divider.visibility = View.GONE
+            cleaned = true
+        }
+        if (icon != null && icon.visibility != View.VISIBLE) {
+            icon.visibility = View.VISIBLE
+            cleaned = true
+        }
+        if (cleaned) HdDebug.log(TAG, "recycled clean at $position")
     }
 
     private fun applyDividerWidth(divider: View, context: Context) {
@@ -924,8 +941,10 @@ object SidebarDockSlotHook : BaseHook() {
         val context = itemView.context ?: return
         resolveResources(context)
         itemView.visibility = View.VISIBLE
-        itemView.findViewById<View>(iconResId)?.visibility = View.GONE
-        itemView.findViewById<View>(placeholderResId)?.visibility = View.GONE
+        // 图标不用 GONE（会被复用到应用行上），清掉图片即可。
+        val icon = itemView.findViewById<View>(iconResId) as? ImageView
+        icon?.visibility = View.VISIBLE
+        icon?.setImageDrawable(null)
         val divider = if (dividerResId != 0) itemView.findViewById<View>(dividerResId) else null
         if (divider == null) {
             // 兜底：宿主布局里没有分割线 view 时自己画一条（当前版本实测有，走不到这里）。
