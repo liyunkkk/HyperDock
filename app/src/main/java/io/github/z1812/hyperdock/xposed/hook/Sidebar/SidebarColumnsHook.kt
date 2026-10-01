@@ -511,11 +511,14 @@ object SidebarColumnsHook : BaseHook() {
                     val position = chain.args.firstOrNull() as? Int ?: return@intercept chain.proceed()
                     val span = SidebarDockState.spanFor(position, columnsNow)
                     // 只记前几格（最近应用 + 分割线那一段），避免刷屏。
-                    if (position <= SidebarDockState.recentItems.size + 2) {
+                    if (position <= 14) {
+                        val item = SidebarDockState.displayList.getOrNull(position)
                         HdDebug.log(
                             "Columns",
-                            "span pos=$position columns=$columnsNow span=$span " +
-                                "divider=${SidebarDockState.isDividerPosition(position)}",
+                            "span pos=$position span=$span divider=" +
+                                SidebarDockState.isDividerPosition(position) +
+                                " item=" + item?.javaClass?.simpleName +
+                                " total=" + SidebarDockState.displayList.size,
                         )
                     }
                     span

@@ -340,6 +340,11 @@ object SidebarDockSlotHook : BaseHook() {
                 lastSlotId = id
                 lastTwoColumns = twoColumnsEnabled()
                 val injected = inject(module, list)
+                HdDebug.log(
+                    TAG,
+                    "final list n=" + injected.size + " [" +
+                        injected.take(16).joinToString(",") { it.javaClass.simpleName } + "]",
+                )
                 lastInjected = injected
                 SidebarDockState.displayList = injected
                 log(
