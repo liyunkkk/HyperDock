@@ -231,7 +231,7 @@ object SidebarHandleHook : BaseHook() {
                     if (params.height != target) {
                         params.height = target
                         updateWindowParams(cover, params)
-                        log(module, "touch area height $base -> $target (x$scale)")
+                        HdDebug.log(TAG, "touch area height " + base + " -> " + target + " (x" + scale + ")")
                     }
                 }
             }.onFailure { logWarn(module, "resize touch area failed: $it") }
@@ -379,7 +379,7 @@ object SidebarHandleHook : BaseHook() {
             }
         }
         touchWrapped[wrapper] = true
-        log(module, "cover touch forwarding installed")
+        HdDebug.log(TAG, "cover touch forwarding installed")
     }
 
     /**
@@ -441,9 +441,9 @@ object SidebarHandleHook : BaseHook() {
         override fun getOpacity(): Int = android.graphics.PixelFormat.TRANSLUCENT
     }
 
-    /** 主线程任务里没有 module 参数时的日志出口。 */
+    /** 日志出口：无条件落盘（module.log 受「调试日志」开关控制，实际是关的，看不到东西）。 */
     private fun logMsg(message: String) {
-        module?.let { log(it, message) }
+        HdDebug.log(TAG, message)
     }
 
     private fun idleHideEnabled(): Boolean =

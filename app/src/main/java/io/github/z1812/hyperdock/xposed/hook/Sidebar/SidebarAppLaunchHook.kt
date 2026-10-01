@@ -62,6 +62,7 @@ object SidebarAppLaunchHook : BaseHook() {
         val loader = param.defaultClassLoader
         HdDebug.installContextProbe(module, loader)
 
+        HdDebug.log(TAG, "resolving launch helpers")
         val util = runCatching { Class.forName(UTIL_CLASS, false, loader) }.getOrNull()
         fullscreenLaunch = util?.declaredMethods?.firstOrNull { method ->
             method.name == "g0" && method.parameterCount == 3 &&
