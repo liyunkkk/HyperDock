@@ -103,6 +103,7 @@ object SidebarDockSlotHook : BaseHook() {
         hookDetachedSmoothScroll(module, loader)
         hookFreeformFilter(module, loader)
         hookPanelTitles(module, loader)
+        hookPanelList(module, loader)
         // 注意：**不要**再往宿主自己的数据列表（z7.u.f()）里塞条目。
         // 宿主的「刷新列表」路径会遍历它，塞进去会让它在侧边栏已关闭时走
         // smoothScrollToPosition 分支 → RecyclerView 已 detach → NPE 闪退
@@ -1366,6 +1367,77 @@ object SidebarDockSlotHook : BaseHook() {
             }
         }
         HdDebug.log(TAG, "panel title probe installed on " + titleClass.name)
+    }
+
+    /**
+     * 直接拦「面板列表」这个产物：宿主的分组构建器在 `com.miui.dock.allapps.g0`
+     * 的内部类里（协程 lambda），产出的 List 里就是 [标题][应用…][分隔][标题][应用…]。
+     * 这里对它的返回值做两件事：
+     * 1. 把「推荐应用」那一组（标题 resId 2131886858 + 它下面的条目）删掉；
+     * 2. 把真实条数打进日志，用来确认「全部小窗应用」读的到底是哪份数据。
+     */
+    private fun hookPanelList(module: XposedModule, loader: ClassLoader) {
+        val owner = runCatching {
+            Class.forName("com.miui.dock.allapps.g0", false, loader)
+        }.getOrNull()
+        if (owner == null) {
+            HdDebug.log(TAG, "panel builder g0 not found")
+            return
+        }
+        var hooked = 0
+        runCatching {
+            owner.declaredClasses.forEach { inner ->
+                inner.declaredMethods
+                    .filter { it.parameterCount == 1 && it.returnType == Any::class.java }
+                    .forEach { method ->
+                        method.isAccessible = true
+                        module.hook(method).intercept { chain ->
+                            val result = chain.proceed()
+                            val list = result as? List<Any> ?: return@intercept result
+                            filterRecommendGroup(module, list)
+                        }
+                        hooked++
+                    }
+            }
+        }.onFailure { HdDebug.log(TAG, "panel list hook failed: $it") }
+        HdDebug.log(TAG, "panel list hooks=" + hooked + " on " + owner.name)
+    }
+
+    /** 删掉「推荐应用」那一组；顺带把统计打进日志。 */
+    private fun filterRecommendGroup(module: XposedModule, list: List<Any>): List<Any> {
+        val titles = list.count { isPanelTitle(it) }
+        val recommendId = 2131886858
+        val hasRecommend = list.any { isPanelTitle(it) && titleResId(it) == recommendId }
+        HdDebug.log(
+            TAG,
+            "panel list n=" + list.size + " titles=" + titles + " hasRecommend=" + hasRecommend,
+        )
+        if (!hasRecommend) return list
+        val out = ArrayList<Any>(list.size)
+        var skipping = false
+        list.forEach { item ->
+            if (isPanelTitle(item)) {
+                skipping = titleResId(item) == recommendId
+            }
+            if (!skipping) out.add(item)
+        }
+        HdDebug.log(TAG, "panel: 去掉推荐应用组 " + (list.size - out.size) + " 条 → " + out.size)
+        return out
+    }
+
+    private fun isPanelTitle(item: Any?): Boolean =
+        item != null && item.javaClass.name.endsWith("Model\$Title")
+
+    private fun titleResId(item: Any?): Int? {
+        val target = item ?: return null
+        val field = generateSequence(target.javaClass as Class<*>?) { it.superclass }
+            .flatMap { runCatching { it.declaredFields.asSequence() }.getOrDefault(emptySequence()) }
+            .firstOrNull { it.type == Integer.TYPE }
+            ?: return null
+        return runCatching {
+            field.isAccessible = true
+            field.get(target) as? Int
+        }.getOrNull()
     }
 
     /** 侧边栏网格（RecyclerView）。 */
