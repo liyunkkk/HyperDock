@@ -1072,19 +1072,38 @@ object SidebarDockSlotHook : BaseHook() {
     }
 
     /**
-     * 分割线那一行：**不再自己改外观**（用户反馈越改越深，要求回到宿主原生样式），
-     * 只保证线是可见的、并且不与复用的 holder 打架。
+     * 分割线那一行：长度和粗细按我们的样式（整行宽 - 两端留白、5dp），
+     * 颜色则用**浅一档的中性灰**（用户反馈深色太重）。
      *
-     * 之前这里改过 icon/placeholder 的可见性，会被复用到应用行上导致布局错乱，
-     * 现在完全不碰它们，只让宿主自己的 divider view 保持可见。
+     * 注意：这里**绝不**碰图标和占位图的可见性 —— 那些 view 会被 ViewHolder
+     * 复用到普通应用行上，之前就是这么把布局搞错的。只动 divider 自己。
      */
     private fun applyGlassDivider(itemView: View) {
         val context = itemView.context ?: return
         resolveResources(context)
         val divider = if (dividerResId != 0) itemView.findViewById<View>(dividerResId) else null
-        if (divider == null) return
-        if (divider.visibility != View.VISIBLE) divider.visibility = View.VISIBLE
-        HdDebug.log(TAG, "divider nativestyle at " + itemView.hashCode())
+        if (divider == null) {
+            itemView.foreground = LiquidGlassLineDrawable(lineHeight(itemView))
+            return
+        }
+        divider.visibility = View.VISIBLE
+        val density = itemView.resources.displayMetrics.density
+        val inset = if (paddingPx > 0) paddingPx else (12 * density).toInt()
+        val height = lineHeight(itemView)
+        val params = divider.layoutParams as? ViewGroup.MarginLayoutParams
+        if (params != null) {
+            params.width = ViewGroup.LayoutParams.MATCH_PARENT
+            params.height = height
+            params.leftMargin = inset
+            params.rightMargin = inset
+            divider.layoutParams = params
+        } else {
+            divider.layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, height)
+        }
+        divider.background = LiquidGlassLineDrawable(height)
+        if (itemView.hashCode() % 7 == 0) {
+            HdDebug.log(TAG, "divider styled(light): inset=" + inset + " height=" + height)
+        }
     }
 
     private fun lineHeight(view: View): Int {
@@ -1113,7 +1132,7 @@ object SidebarDockSlotHook : BaseHook() {
             // 外层深色柔光：让线在浅色面板上也有边界
             paint.shader = android.graphics.LinearGradient(
                 0f, top, 0f, bottom,
-                intArrayOf(0x00000000, 0x2E000000, 0x00000000),
+                intArrayOf(0x00000000, 0x1F000000, 0x00000000),
                 floatArrayOf(0f, 0.5f, 1f),
                 android.graphics.Shader.TileMode.CLAMP,
             )
@@ -1122,13 +1141,13 @@ object SidebarDockSlotHook : BaseHook() {
 
             // 中间深灰芯
             paint.shader = null
-            paint.color = 0x9A707070.toInt()
+            paint.color = 0x738A8A8A.toInt()
             val core = (height * 0.55f).coerceAtLeast(3f)
             rect.set(bounds.left.toFloat(), centerY - core / 2f, bounds.right.toFloat(), centerY + core / 2f)
             canvas.drawRoundRect(rect, core / 2f, core / 2f, paint)
 
             // 顶边高光，做出玻璃的厚度感
-            paint.color = 0x40FFFFFF
+            paint.color = 0x59FFFFFF
             val highlight = (height * 0.18f).coerceAtLeast(1f)
             rect.set(bounds.left.toFloat(), top + 1f, bounds.right.toFloat(), top + 1f + highlight)
             canvas.drawRoundRect(rect, highlight / 2f, highlight / 2f, paint)
