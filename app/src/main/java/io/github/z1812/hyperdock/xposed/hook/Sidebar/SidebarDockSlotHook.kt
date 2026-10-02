@@ -1072,39 +1072,19 @@ object SidebarDockSlotHook : BaseHook() {
     }
 
     /**
-     * 给分割线那一行上样式：宿主自己的 `a8.b` 条目走的是宿主的 bind，
-     * 我写的这套（加粗加深 + 两端留白）必须在这里也补一次，否则看到的还是宿主那条细浅线。
+     * 分割线那一行：**不再自己改外观**（用户反馈越改越深，要求回到宿主原生样式），
+     * 只保证线是可见的、并且不与复用的 holder 打架。
+     *
+     * 之前这里改过 icon/placeholder 的可见性，会被复用到应用行上导致布局错乱，
+     * 现在完全不碰它们，只让宿主自己的 divider view 保持可见。
      */
     private fun applyGlassDivider(itemView: View) {
         val context = itemView.context ?: return
         resolveResources(context)
-        itemView.visibility = View.VISIBLE
-        val icon = itemView.findViewById<View>(iconResId) as? ImageView
-        icon?.visibility = View.VISIBLE
-        icon?.setImageDrawable(null)
-        itemView.findViewById<View>(placeholderResId)?.visibility = View.GONE
         val divider = if (dividerResId != 0) itemView.findViewById<View>(dividerResId) else null
-        if (divider == null) {
-            itemView.foreground = LiquidGlassLineDrawable(lineHeight(itemView))
-            HdDebug.log(TAG, "divider: 无宿主 view，用 foreground 自绘")
-            return
-        }
-        divider.visibility = View.VISIBLE
-        val density = itemView.resources.displayMetrics.density
-        val inset = if (paddingPx > 0) paddingPx else (12 * density).toInt()
-        val height = lineHeight(itemView)
-        val params = divider.layoutParams as? ViewGroup.MarginLayoutParams
-        if (params != null) {
-            params.width = ViewGroup.LayoutParams.MATCH_PARENT
-            params.height = height
-            params.leftMargin = inset
-            params.rightMargin = inset
-            divider.layoutParams = params
-        } else {
-            divider.layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, height)
-        }
-        divider.background = LiquidGlassLineDrawable(height)
-        HdDebug.log(TAG, "divider styled: inset=" + inset + " height=" + height + " w=" + itemView.width)
+        if (divider == null) return
+        if (divider.visibility != View.VISIBLE) divider.visibility = View.VISIBLE
+        HdDebug.log(TAG, "divider nativestyle at " + itemView.hashCode())
     }
 
     private fun lineHeight(view: View): Int {
