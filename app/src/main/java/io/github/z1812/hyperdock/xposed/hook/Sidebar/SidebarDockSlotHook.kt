@@ -1370,27 +1370,40 @@ object SidebarDockSlotHook : BaseHook() {
     }
 
     /**
-     * 直接拦「面板列表」这个产物：宿主的分组构建器在 `com.miui.dock.allapps.g0`
-     * 的内部类里（协程 lambda），产出的 List 里就是 [标题][应用…][分隔][标题][应用…]。
-     * 这里对它的返回值做两件事：
-     * 1. 把「推荐应用」那一组（标题 resId 2131886858 + 它下面的条目）删掉；
-     * 2. 把真实条数打进日志，用来确认「全部小窗应用」读的到底是哪份数据。
+     * 直接拦「面板列表」这个产物。
+     *
+     * 调用链日志已经确认：面板的分组列表是在 `com.miui.dock.allapps.g0$d` 的
+     * `invokeSuspend` 里造的（line 65 造「推荐应用」标题、line 156 造「全部小窗应用」）。
+     * 它是**匿名/局部类**，不在 `g0.declaredClasses` 里，必须按类名取。
+     *
+     * 这里对它的返回值（List）做两件事：
+     * 1. 删掉「推荐应用」那一组（标题 resId 2131886858 + 它下面的条目）；
+     * 2. 把条数与各条目类型打进日志，确认「全部小窗应用」读的是哪份数据。
      */
     private fun hookPanelList(module: XposedModule, loader: ClassLoader) {
-        val owner = runCatching {
-            Class.forName("com.miui.dock.allapps.g0", false, loader)
-        }.getOrNull()
-        if (owner == null) {
-            HdDebug.log(TAG, "panel builder g0 not found")
+        val candidates = ArrayList<Class<*>>()
+        listOf(
+            "com.miui.dock.allapps.g0\$d",
+            "com.miui.dock.allapps.g0\$c",
+            "com.miui.dock.allapps.g0\$e",
+        ).forEach { name ->
+            runCatching { Class.forName(name, false, loader) }.getOrNull()?.let { candidates.add(it) }
+        }
+        runCatching {
+            Class.forName("com.miui.dock.allapps.g0", false, loader).declaredClasses
+                .forEach { candidates.add(it) }
+        }
+        if (candidates.isEmpty()) {
+            HdDebug.log(TAG, "panel builder classes not found")
             return
         }
         var hooked = 0
-        runCatching {
-            owner.declaredClasses.forEach { inner ->
-                inner.declaredMethods
-                    .filter { it.parameterCount == 1 && it.returnType == Any::class.java }
-                    .forEach { method ->
-                        method.isAccessible = true
+        candidates.distinct().forEach { cls ->
+            cls.declaredMethods
+                .filter { it.parameterCount == 1 && it.returnType == Any::class.java }
+                .forEach { method ->
+                    method.isAccessible = true
+                    runCatching {
                         module.hook(method).intercept { chain ->
                             val result = chain.proceed()
                             val list = result as? List<Any> ?: return@intercept result
@@ -1398,20 +1411,21 @@ object SidebarDockSlotHook : BaseHook() {
                         }
                         hooked++
                     }
-            }
-        }.onFailure { HdDebug.log(TAG, "panel list hook failed: $it") }
-        HdDebug.log(TAG, "panel list hooks=" + hooked + " on " + owner.name)
+                }
+        }
+        HdDebug.log(
+            TAG,
+            "panel list hooks=" + hooked + " classes=" + candidates.joinToString(",") { it.simpleName },
+        )
     }
 
     /** 删掉「推荐应用」那一组；顺带把统计打进日志。 */
     private fun filterRecommendGroup(module: XposedModule, list: List<Any>): List<Any> {
-        val titles = list.count { isPanelTitle(it) }
+        if (list.isEmpty()) return list
+        val kinds = list.groupingBy { it.javaClass.simpleName }.eachCount()
+        HdDebug.log(TAG, "panel list n=" + list.size + " kinds=" + kinds)
         val recommendId = 2131886858
         val hasRecommend = list.any { isPanelTitle(it) && titleResId(it) == recommendId }
-        HdDebug.log(
-            TAG,
-            "panel list n=" + list.size + " titles=" + titles + " hasRecommend=" + hasRecommend,
-        )
         if (!hasRecommend) return list
         val out = ArrayList<Any>(list.size)
         var skipping = false
