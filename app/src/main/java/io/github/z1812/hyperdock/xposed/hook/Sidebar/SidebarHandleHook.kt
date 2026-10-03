@@ -377,12 +377,12 @@ object SidebarHandleHook : BaseHook() {
                 cover.background = null
                 logMsg("own bar hidden after ${IDLE_HIDE_MS}ms idle")
             }
-            return
-        }
-        val image = handle as? ImageView ?: return
-        if (image.drawable != null) {
+        } else {
+        val image = handle as? ImageView
+        if (image != null && image.drawable != null) {
             image.setImageDrawable(null)
             logMsg("handle bar hidden after ${IDLE_HIDE_MS}ms idle")
+        }
         }
         runCatching {
             val c = coverAccessor?.invoke(wrapper) as? View
@@ -432,9 +432,13 @@ object SidebarHandleHook : BaseHook() {
     private fun installTouchForwarding(module: XposedModule, wrapper: Any, cover: View, handle: View) {
         val native = cover as? View.OnTouchListener
         val listener = View.OnTouchListener { view, event ->
-            touchActivity(wrapper, handle)
+            // 宿主闲置/重建时会换掉视图，闭包里捕获的 handle 可能已经不在窗口上，
+            // 转发出去就等于打空（表现：放大区域滑不动，只有真实黑条管用）。这里每次现取。
+            val current = runCatching { handleAccessor?.invoke(wrapper) as? View }.getOrNull()
+                ?: handle
+            touchActivity(wrapper, current)
             if (forwarding[wrapper] == true) {
-                val result = runCatching { handle.dispatchTouchEvent(event) }.getOrDefault(false)
+                val result = runCatching { current.dispatchTouchEvent(event) }.getOrDefault(false)
                 if (event.actionMasked == MotionEvent.ACTION_UP ||
                     event.actionMasked == MotionEvent.ACTION_CANCEL
                 ) {
@@ -447,7 +451,7 @@ object SidebarHandleHook : BaseHook() {
                     true
                 } else if (event.actionMasked == MotionEvent.ACTION_DOWN) {
                     forwarding[wrapper] = true
-                    runCatching { handle.dispatchTouchEvent(event) }.getOrDefault(false)
+                    runCatching { current.dispatchTouchEvent(event) }.getOrDefault(false)
                 } else {
                     false
                 }
