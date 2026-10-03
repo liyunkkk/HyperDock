@@ -240,6 +240,15 @@ object SidebarHandleHook : BaseHook() {
     private fun applyTo(module: XposedModule, wrapper: Any) {
         val cover = runCatching { coverAccessor?.invoke(wrapper) as? View }.getOrNull()
         val handle = runCatching { handleAccessor?.invoke(wrapper) as? View }.getOrNull()
+        runCatching {
+            val wp = cover?.layoutParams as? WindowManager.LayoutParams
+            HdDebug.log(
+                TAG,
+                "applyTo cover=" + (cover != null) + " handle=" + (handle != null) +
+                    " scale=" + scaleFactor() + " wH=" + wp?.height +
+                    " attached=" + cover?.isAttachedToWindow + " base=" + baseHeights[wrapper],
+            )
+        }
         if (handle != null) {
             handleOwner[handle] = wrapper
             captureDrawable(wrapper, handle)
@@ -274,6 +283,7 @@ object SidebarHandleHook : BaseHook() {
         }
 
         // 触摸转发：宿主可能把监听顶掉，所以每次 apply 都重挂一遍（幂等）。
+        if (cover != null) ensureCoverAttached(wrapper, cover)
         if (cover != null && handle != null) {
             val existing = touchListeners[wrapper]
             if (existing != null) {
@@ -374,7 +384,16 @@ object SidebarHandleHook : BaseHook() {
             image.setImageDrawable(null)
             logMsg("handle bar hidden after ${IDLE_HIDE_MS}ms idle")
         }
-        // 闲置期间宿主可能已经把窗口参数冲掉，这里顺手补一次
+        runCatching {
+            val c = coverAccessor?.invoke(wrapper) as? View
+            val wp = c?.layoutParams as? WindowManager.LayoutParams
+            HdDebug.log(
+                TAG,
+                "idle-hide check cover=" + (c != null) + " attached=" + c?.isAttachedToWindow +
+                    " wH=" + wp?.height,
+            )
+        }
+        // 闲置期间宿主可能已经把 cover 摘掉/把参数冲掉，这里顺手补一次
         module?.let { runCatching { applyTo(it, wrapper) } }
     }
 
@@ -384,6 +403,30 @@ object SidebarHandleHook : BaseHook() {
             val windowManager = view.context.getSystemService(Context.WINDOW_SERVICE) as? WindowManager
             windowManager?.updateViewLayout(view, params)
         }
+    }
+
+    /**
+     * cover 窗口被宿主摘掉（闲置/释放面板）之后，放大区域就彻底没有了——只剩面板里那截
+     * 真实黑条能滑，滑一次触发打开流程才恢复。这里借宿主自己的窗口助手（`p.o()` 返回的 l0）
+     * 把 cover 重新 addView 回去，参数用它当前那份（含我们放大的高度）。
+     */
+    private fun ensureCoverAttached(wrapper: Any, cover: View) {
+        if (cover.isAttachedToWindow) return
+        val params = cover.layoutParams as? WindowManager.LayoutParams ?: return
+        val helper = runCatching {
+            wrapper.javaClass.methods.firstOrNull { it.parameterCount == 0 && it.name == "o" }
+                ?.invoke(wrapper)
+        }.getOrNull() ?: return
+        val add = runCatching {
+            helper.javaClass.methods.firstOrNull { method ->
+                method.parameterCount == 2 && method.returnType == Void.TYPE &&
+                    method.parameterTypes[0] == View::class.java &&
+                    method.parameterTypes[1] == WindowManager.LayoutParams::class.java
+            }
+        }.getOrNull() ?: return
+        runCatching { add.invoke(helper, cover, params) }
+            .onSuccess { HdDebug.log(TAG, "cover re-attached by module, h=" + params.height) }
+            .onFailure { HdDebug.log(TAG, "cover re-attach failed: " + it) }
     }
 
     private fun installTouchForwarding(module: XposedModule, wrapper: Any, cover: View, handle: View) {
