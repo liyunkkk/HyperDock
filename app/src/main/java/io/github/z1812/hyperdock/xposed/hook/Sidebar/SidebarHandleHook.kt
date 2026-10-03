@@ -80,6 +80,9 @@ object SidebarHandleHook : BaseHook() {
     /** wrapper 实例 -> 是否已经包过触摸转发。 */
     private val touchWrapped = Collections.synchronizedMap(WeakHashMap<Any, Boolean>())
 
+    /** wrapper 实例 -> 我们装上去的触摸监听，宿主可能顶掉它，需要能重挂。 */
+    private val touchListeners = Collections.synchronizedMap(WeakHashMap<Any, View.OnTouchListener>())
+
     /** wrapper 实例 -> 当前是否处于「原生不处理、由我们转发」的手势中。 */
     private val forwarding = Collections.synchronizedMap(WeakHashMap<Any, Boolean>())
 
@@ -150,6 +153,28 @@ object SidebarHandleHook : BaseHook() {
                 chain.proceed()
             }
         }.onFailure { logWarn(module, "hook handle dispatchTouchEvent failed: $it") }
+
+        // 宿主在闲置/释放面板后会重新下发窗口参数，把我们的高度冲掉——
+        // 表现就是「闲置久了放大区域失效，只能滑原生黑条长度」。这里盯住它的下发入口。
+        runCatching {
+            val l0 = Class.forName("vb.l0", false, loader)
+            val update = l0.declaredMethods.firstOrNull { method ->
+                method.parameterCount == 2 && method.returnType == Void.TYPE &&
+                    method.parameterTypes[0] == View::class.java &&
+                    method.parameterTypes[1] == WindowManager.LayoutParams::class.java
+            }
+            if (update == null) {
+                HdDebug.log(TAG, "host updateViewLayout entry not found")
+            } else {
+                update.isAccessible = true
+                module.hook(update).intercept { chain ->
+                    val result = chain.proceed()
+                    (chain.args.getOrNull(0) as? View)?.let { view -> reassertForCover(view) }
+                    result
+                }
+                HdDebug.log(TAG, "host updateViewLayout hooked")
+            }
+        }.onFailure { HdDebug.log(TAG, "updateViewLayout hook failed: $it") }
 
         // 构造后立刻应用一次。
         wrapperClass.declaredConstructors.forEach { constructor ->
@@ -248,9 +273,14 @@ object SidebarHandleHook : BaseHook() {
             }
         }
 
-        // 触摸转发
-        if (cover != null && handle != null && touchWrapped[wrapper] != true) {
-            installTouchForwarding(module, wrapper, cover, handle)
+        // 触摸转发：宿主可能把监听顶掉，所以每次 apply 都重挂一遍（幂等）。
+        if (cover != null && handle != null) {
+            val existing = touchListeners[wrapper]
+            if (existing != null) {
+                cover.setOnTouchListener(existing)
+            } else if (touchWrapped[wrapper] != true) {
+                installTouchForwarding(module, wrapper, cover, handle)
+            }
         }
 
         // 可见黑条：倍率 > 1 时自绘一条（长度 = 原生线长 × 倍率，窗口放得下、不会被裁），
@@ -344,6 +374,8 @@ object SidebarHandleHook : BaseHook() {
             image.setImageDrawable(null)
             logMsg("handle bar hidden after ${IDLE_HIDE_MS}ms idle")
         }
+        // 闲置期间宿主可能已经把窗口参数冲掉，这里顺手补一次
+        module?.let { runCatching { applyTo(it, wrapper) } }
     }
 
     /** 用宿主自己的 WindowManager 更新参数；视图还没 attach 时静默跳过，下次打开再补。 */
@@ -356,7 +388,7 @@ object SidebarHandleHook : BaseHook() {
 
     private fun installTouchForwarding(module: XposedModule, wrapper: Any, cover: View, handle: View) {
         val native = cover as? View.OnTouchListener
-        cover.setOnTouchListener { view, event ->
+        val listener = View.OnTouchListener { view, event ->
             touchActivity(wrapper, handle)
             if (forwarding[wrapper] == true) {
                 val result = runCatching { handle.dispatchTouchEvent(event) }.getOrDefault(false)
@@ -378,6 +410,8 @@ object SidebarHandleHook : BaseHook() {
                 }
             }
         }
+        touchListeners[wrapper] = listener
+        cover.setOnTouchListener(listener)
         touchWrapped[wrapper] = true
         HdDebug.log(TAG, "cover touch forwarding installed")
     }
@@ -439,6 +473,18 @@ object SidebarHandleHook : BaseHook() {
 
         @Deprecated("Deprecated in Java")
         override fun getOpacity(): Int = android.graphics.PixelFormat.TRANSLUCENT
+    }
+
+    /** 宿主重新下发窗口参数后，把我们的高度与触摸转发补回去。 */
+    private fun reassertForCover(view: View) {
+        val current = module ?: return
+        val wrapper = synchronized(handleOwner) {
+            handleOwner.entries.firstOrNull { entry ->
+                runCatching { coverAccessor?.invoke(entry.value) === view }.getOrDefault(false)
+            }?.value
+        } ?: return
+        HdDebug.log(TAG, "cover params updated by host → re-assert")
+        runCatching { applyTo(current, wrapper) }
     }
 
     /** 日志出口：无条件落盘（module.log 受「调试日志」开关控制，实际是关的，看不到东西）。 */
