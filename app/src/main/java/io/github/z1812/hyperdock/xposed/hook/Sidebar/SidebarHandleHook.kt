@@ -293,17 +293,11 @@ object SidebarHandleHook : BaseHook() {
             }
         }
 
-        // 可见黑条：倍率 > 1 时自绘一条（长度 = 原生线长 × 倍率，窗口放得下、不会被裁），
-        // 倍率为原生时把宿主 drawable 还回去、不画自己的。
-        val scale = scaleFactor()
-        if (cover != null && handle != null) {
-            if (scale > 1) {
-                ownBars[wrapper] = buildBarDrawable(cover, scale)
-                if (handle is ImageView) handle.setImageDrawable(null)
-            } else {
-                ownBars.remove(wrapper)
-                cover.background = null
-            }
+        // 黑条本体按用户最终要求：**保持宿主原生长度**，不再自绘也不拉长；
+        // 放大的只有触摸区域（cover 窗口高度）。之前自绘过就把它清掉，回到宿主 drawable。
+        if (ownBars.remove(wrapper) != null && cover != null) {
+            cover.background = null
+            HdDebug.log(TAG, "own bar disabled, keep native length")
         }
 
         // 可见性：开关打开时先显示并起计时；关掉时恢复常显。
