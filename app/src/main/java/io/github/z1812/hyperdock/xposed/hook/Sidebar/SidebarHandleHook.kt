@@ -380,8 +380,9 @@ object SidebarHandleHook : BaseHook() {
                     " wH=" + wp?.height,
             )
         }
-        // 闲置期间宿主可能已经把 cover 摘掉/把参数冲掉，这里顺手补一次
-        module?.let { runCatching { applyTo(it, wrapper) } }
+        // 这里**不要**再调 applyTo：它会调用 showHandle 把黑条重新亮回来
+        // （日志实测：hidden 之后立刻 native bar shown，等于隐藏失效）。
+        // 窗口参数由「宿主参数下发处」的兜底负责，不需要在这里补。
     }
 
     /** 用宿主自己的 WindowManager 更新参数；视图还没 attach 时静默跳过，下次打开再补。 */
@@ -530,8 +531,10 @@ object SidebarHandleHook : BaseHook() {
         ConfigManager.getBoolean(PrefKeys.SIDEBAR_HANDLE_IDLE_HIDE, true)
 
     private fun scaleFactor(): Int {
-        // 临时停用放大：窗口高度保持原生（原因同上）。恢复时改回读 PrefKeys.SIDEBAR_TOUCH_SCALE。
-        return 1
+        // 触摸面积倍率照设置生效：只放大 cover 窗口高度，**不再安装整层转发**
+        // （转发会吃掉右侧边缘的触摸，已删除），所以不会影响系统手势与应用操作。
+        val raw = ConfigManager.getString(PrefKeys.SIDEBAR_TOUCH_SCALE, PrefKeys.TOUCH_SCALE_OFF)
+        return raw.toIntOrNull()?.coerceIn(1, MAX_SCALE) ?: 1
     }
 
     private fun isUiProcess(packageName: String, processName: String): Boolean {
