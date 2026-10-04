@@ -237,7 +237,7 @@ object SidebarHandleHook : BaseHook() {
         return (strict ?: candidates.firstOrNull())?.apply { isAccessible = true }
     }
 
-    private fun applyTo(module: XposedModule, wrapper: Any) {
+    private fun applyTo(module: XposedModule, wrapper: Any, showBar: Boolean = true) {
         val cover = runCatching { coverAccessor?.invoke(wrapper) as? View }.getOrNull()
         val handle = runCatching { handleAccessor?.invoke(wrapper) as? View }.getOrNull()
         runCatching {
@@ -282,9 +282,17 @@ object SidebarHandleHook : BaseHook() {
             }
         }
 
-        // 临时停用：整层触摸转发会把右侧边缘的触摸全部吃掉（用户反馈"右边屏幕都没办法滑动"）。
-        // 这里不再安装/重挂转发监听，也不重挂 cover 窗口，完全回到宿主原生触摸行为。
-        // 后续要做成"只在水平拖动时才接管"，再放开这段。
+        // 触摸转发：只在倍率 > 1（即用户主动放大了触摸区域）时安装，
+        // 并且带"横向拖动才接管"的判定 —— 纵向滑动/点按一律不消费，避免吃掉右侧边缘。
+        // 把设置调回「原生」即彻底不安装，等于关闭这一功能。
+        if (cover != null && handle != null && scaleFactor() > 1) {
+            val existing = touchListeners[wrapper]
+            if (existing != null) {
+                cover.setOnTouchListener(existing)
+            } else {
+                installTouchForwarding(module, wrapper, cover, handle)
+            }
+        }
 
         // 黑条本体按用户最终要求：**保持宿主原生长度**，不再自绘也不拉长；
         // 放大的只有触摸区域（cover 窗口高度）。之前自绘过就把它清掉，回到宿主 drawable。
@@ -293,8 +301,9 @@ object SidebarHandleHook : BaseHook() {
             HdDebug.log(TAG, "own bar disabled, keep native length")
         }
 
-        // 可见性：开关打开时先显示并起计时；关掉时恢复常显。
-        if (handle != null) {
+        // 可见性：只有"打开侧边栏/触摸"这类入口才亮黑条；
+        // 宿主改窗口参数的兜底不能走这里，否则隐藏完立刻被亮回来（日志实测过）。
+        if (showBar && handle != null) {
             val idleHide = idleHideEnabled()
             showHandle(wrapper, handle, resetTimer = idleHide)
             if (!idleHide) cancelIdleTask(wrapper)
@@ -419,30 +428,53 @@ object SidebarHandleHook : BaseHook() {
 
     private fun installTouchForwarding(module: XposedModule, wrapper: Any, cover: View, handle: View) {
         val native = cover as? View.OnTouchListener
+        // 手势判定用的局部状态（每个 wrapper 一个 listener 实例）
+        var downX = 0f
+        var downY = 0f
+        var forwardingNow = false
+        val slop = (12 * cover.resources.displayMetrics.density).toInt().coerceAtLeast(16)
         val listener = View.OnTouchListener { view, event ->
-            // 宿主闲置/重建时会换掉视图，闭包里捕获的 handle 可能已经不在窗口上，
-            // 转发出去就等于打空（表现：放大区域滑不动，只有真实黑条管用）。这里每次现取。
+            // 宿主闲置/重建会换掉视图，闭包里的 handle 可能已失效，这里每次现取
             val current = runCatching { handleAccessor?.invoke(wrapper) as? View }.getOrNull()
                 ?: handle
             touchActivity(wrapper, current)
-            if (forwarding[wrapper] == true) {
-                val result = runCatching { current.dispatchTouchEvent(event) }.getOrDefault(false)
-                if (event.actionMasked == MotionEvent.ACTION_UP ||
-                    event.actionMasked == MotionEvent.ACTION_CANCEL
-                ) {
-                    forwarding.remove(wrapper)
-                }
-                result
-            } else {
-                val handled = runCatching { native?.onTouch(view, event) ?: false }.getOrDefault(false)
-                if (handled) {
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    downX = event.rawX
+                    downY = event.rawY
+                    forwardingNow = false
+                    // 先让原生试；原生不处理（全面屏手势下就是这种情况）我们自己拿着这次手势，
+                    // 否则收不到后续 MOVE，也就无法判断方向。
+                    runCatching { native?.onTouch(view, event) ?: false }.getOrDefault(false)
                     true
-                } else if (event.actionMasked == MotionEvent.ACTION_DOWN) {
-                    forwarding[wrapper] = true
-                    runCatching { current.dispatchTouchEvent(event) }.getOrDefault(false)
-                } else {
-                    false
                 }
+                MotionEvent.ACTION_MOVE -> {
+                    if (forwardingNow) {
+                        runCatching { current.dispatchTouchEvent(event) }.getOrDefault(false)
+                    } else {
+                        val dx = kotlin.math.abs(event.rawX - downX)
+                        val dy = kotlin.math.abs(event.rawY - downY)
+                        when {
+                            dx < slop && dy < slop -> true
+                            dx >= dy -> {
+                                // 横向拖动才交给小横条（拖出侧边栏），纵向一律不接管
+                                forwardingNow = true
+                                runCatching { current.dispatchTouchEvent(event) }.getOrDefault(false)
+                            }
+                            else -> false
+                        }
+                    }
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    val r = if (forwardingNow) {
+                        runCatching { current.dispatchTouchEvent(event) }.getOrDefault(false)
+                    } else {
+                        false
+                    }
+                    forwardingNow = false
+                    r
+                }
+                else -> runCatching { native?.onTouch(view, event) ?: false }.getOrDefault(false)
             }
         }
         touchListeners[wrapper] = listener
@@ -519,7 +551,7 @@ object SidebarHandleHook : BaseHook() {
             }?.value
         } ?: return
         HdDebug.log(TAG, "cover params updated by host → re-assert")
-        runCatching { applyTo(current, wrapper) }
+        runCatching { applyTo(current, wrapper, showBar = false) }
     }
 
     /** 日志出口：无条件落盘（module.log 受「调试日志」开关控制，实际是关的，看不到东西）。 */
