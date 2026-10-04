@@ -282,16 +282,9 @@ object SidebarHandleHook : BaseHook() {
             }
         }
 
-        // 触摸转发：宿主可能把监听顶掉，所以每次 apply 都重挂一遍（幂等）。
-        if (false && cover != null) ensureCoverAttached(wrapper, cover)
-        if (false && cover != null && handle != null) {
-            val existing = touchListeners[wrapper]
-            if (existing != null) {
-                cover.setOnTouchListener(existing)
-            } else if (touchWrapped[wrapper] != true) {
-                installTouchForwarding(module, wrapper, cover, handle)
-            }
-        }
+        // 临时停用：整层触摸转发会把右侧边缘的触摸全部吃掉（用户反馈"右边屏幕都没办法滑动"）。
+        // 这里不再安装/重挂转发监听，也不重挂 cover 窗口，完全回到宿主原生触摸行为。
+        // 后续要做成"只在水平拖动时才接管"，再放开这段。
 
         // 黑条本体按用户最终要求：**保持宿主原生长度**，不再自绘也不拉长；
         // 放大的只有触摸区域（cover 窗口高度）。之前自绘过就把它清掉，回到宿主 drawable。
@@ -537,11 +530,8 @@ object SidebarHandleHook : BaseHook() {
         ConfigManager.getBoolean(PrefKeys.SIDEBAR_HANDLE_IDLE_HIDE, true)
 
     private fun scaleFactor(): Int {
-        // 临时停用：放大窗口 + 整层转发会把右侧边缘的触摸吃掉（用户反馈"右边屏幕滑不动"），
-        // 先回到宿主原生行为，等做成"只在水平拖动时接管"再放开。
-        if (true) return 1
-        val raw = ConfigManager.getString(PrefKeys.SIDEBAR_TOUCH_SCALE, PrefKeys.TOUCH_SCALE_OFF)
-        return raw.toIntOrNull()?.coerceIn(1, MAX_SCALE) ?: 1
+        // 临时停用放大：窗口高度保持原生（原因同上）。恢复时改回读 PrefKeys.SIDEBAR_TOUCH_SCALE。
+        return 1
     }
 
     private fun isUiProcess(packageName: String, processName: String): Boolean {
