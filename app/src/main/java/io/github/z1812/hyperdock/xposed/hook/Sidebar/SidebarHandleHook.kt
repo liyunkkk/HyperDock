@@ -283,8 +283,8 @@ object SidebarHandleHook : BaseHook() {
         }
 
         // 触摸转发：宿主可能把监听顶掉，所以每次 apply 都重挂一遍（幂等）。
-        if (cover != null) ensureCoverAttached(wrapper, cover)
-        if (cover != null && handle != null) {
+        if (false && cover != null) ensureCoverAttached(wrapper, cover)
+        if (false && cover != null && handle != null) {
             val existing = touchListeners[wrapper]
             if (existing != null) {
                 cover.setOnTouchListener(existing)
@@ -537,6 +537,9 @@ object SidebarHandleHook : BaseHook() {
         ConfigManager.getBoolean(PrefKeys.SIDEBAR_HANDLE_IDLE_HIDE, true)
 
     private fun scaleFactor(): Int {
+        // 临时停用：放大窗口 + 整层转发会把右侧边缘的触摸吃掉（用户反馈"右边屏幕滑不动"），
+        // 先回到宿主原生行为，等做成"只在水平拖动时接管"再放开。
+        if (true) return 1
         val raw = ConfigManager.getString(PrefKeys.SIDEBAR_TOUCH_SCALE, PrefKeys.TOUCH_SCALE_OFF)
         return raw.toIntOrNull()?.coerceIn(1, MAX_SCALE) ?: 1
     }
