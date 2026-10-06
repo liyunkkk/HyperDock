@@ -432,20 +432,20 @@ object SidebarHandleHook : BaseHook() {
         var downX = 0f
         var downY = 0f
         var forwardingNow = false
+        var pendingDown: MotionEvent? = null
         val slop = (12 * cover.resources.displayMetrics.density).toInt().coerceAtLeast(16)
         val listener = View.OnTouchListener { view, event ->
-            // 宿主闲置/重建会换掉视图，闭包里的 handle 可能已失效，这里每次现取
             val current = runCatching { handleAccessor?.invoke(wrapper) as? View }.getOrNull()
                 ?: handle
-            touchActivity(wrapper, current)
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     downX = event.rawX
                     downY = event.rawY
                     forwardingNow = false
-                    // 先让原生试；原生不处理（全面屏手势下就是这种情况）我们自己拿着这次手势，
-                    // 否则收不到后续 MOVE，也就无法判断方向。
-                    runCatching { native?.onTouch(view, event) ?: false }.getOrDefault(false)
+                    // 关键：这里**不调用**宿主自己的处理（它的按下动画会把黑条变成椭圆块，
+                    // 放大区域里就成了误触）。按下事件先自己存着，等判定出横向拖动再补交给黑条。
+                    pendingDown?.recycle()
+                    pendingDown = MotionEvent.obtain(event)
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
@@ -457,9 +457,13 @@ object SidebarHandleHook : BaseHook() {
                         when {
                             dx < slop && dy < slop -> true
                             dx >= dy -> {
-                                // 横向拖动才交给小横条（拖出侧边栏），纵向一律不接管
+                                // 判定为横向拖动：补交按下事件，再送这一帧，之后持续转发
                                 forwardingNow = true
-                                runCatching { current.dispatchTouchEvent(event) }.getOrDefault(false)
+                                touchActivity(wrapper, current)
+                                runCatching {
+                                    pendingDown?.let { current.dispatchTouchEvent(it) }
+                                    current.dispatchTouchEvent(event)
+                                }.getOrDefault(false)
                             }
                             else -> false
                         }
@@ -472,9 +476,11 @@ object SidebarHandleHook : BaseHook() {
                         false
                     }
                     forwardingNow = false
+                    pendingDown?.recycle()
+                    pendingDown = null
                     r
                 }
-                else -> runCatching { native?.onTouch(view, event) ?: false }.getOrDefault(false)
+                else -> false
             }
         }
         touchListeners[wrapper] = listener
