@@ -80,6 +80,12 @@ object SidebarHandleHook : BaseHook() {
     /** wrapper 实例 -> 是否已经包过触摸转发。 */
     private val touchWrapped = Collections.synchronizedMap(WeakHashMap<Any, Boolean>())
 
+    /** 已经挂过 dispatchTouchEvent 的 cover 类（宿主换实例时类不变，所以挂类最稳）。 */
+    private val coverDispatchHooked = Collections.synchronizedSet(HashSet<Class<*>>())
+
+    /** wrapper -> 手势状态（按下点 / 是否已判定横向拖动）。 */
+    private val gestureStates = Collections.synchronizedMap(WeakHashMap<Any, FloatArray>())
+
     /** wrapper 实例 -> 我们装上去的触摸监听，宿主可能顶掉它，需要能重挂。 */
     private val touchListeners = Collections.synchronizedMap(WeakHashMap<Any, View.OnTouchListener>())
 
@@ -286,13 +292,15 @@ object SidebarHandleHook : BaseHook() {
         // 并且带"横向拖动才接管"的判定 —— 纵向滑动/点按一律不消费，避免吃掉右侧边缘。
         // 把设置调回「原生」即彻底不安装，等于关闭这一功能。
         if (cover != null && handle != null && scaleFactor() > 1) {
-            val existing = touchListeners[wrapper]
-            if (existing != null) {
-                cover.setOnTouchListener(existing)
-            } else {
-                runCatching { installTouchForwarding(module, wrapper, cover, handle) }
-                    .onFailure { HdDebug.log(TAG, "install forwarding failed: " + it) }
-            }
+            hookCoverDispatch(module, cover)
+            // 新 cover 出现时参数往往还没就绪（日志里 wH=null），下一帧再补一次放大与转发判定。
+            cover.postDelayed(
+                {
+                    runCatching { applyTo(module, wrapper, showBar = false) }
+                        .onFailure { HdDebug.log(TAG, "delayed apply failed: " + it) }
+                },
+                150,
+            )
         }
 
         // 黑条本体按用户最终要求：**保持宿主原生长度**，不再自绘也不拉长；
@@ -425,6 +433,72 @@ object SidebarHandleHook : BaseHook() {
         runCatching { add.invoke(helper, cover, params) }
             .onSuccess { HdDebug.log(TAG, "cover re-attached by module, h=" + params.height) }
             .onFailure { HdDebug.log(TAG, "cover re-attach failed: " + it) }
+    }
+
+    /**
+     * 把触摸判定挂在 cover 的**类**上（`dispatchTouchEvent`），而不是某个实例的
+     * OnTouchListener —— 宿主闲置/重建时会换掉 cover 实例，挂实例就会失效
+     * （日志实测：新实例 wH=null，转发要等下一次打开侧边栏才装上）。
+     */
+    private fun hookCoverDispatch(module: XposedModule, cover: View) {
+        val cls = cover.javaClass
+        if (!coverDispatchHooked.add(cls)) return
+        val method = runCatching {
+            cls.declaredMethods.firstOrNull {
+                it.name == "dispatchTouchEvent" && it.parameterCount == 1
+            }
+        }.getOrNull()
+        if (method == null) {
+            HdDebug.log(TAG, "cover dispatchTouchEvent not found")
+            return
+        }
+        method.isAccessible = true
+        runCatching {
+            module.hook(method).intercept { chain ->
+                val view = chain.thisObject as? View
+                val event = chain.args.getOrNull(0) as? MotionEvent
+                if (view == null || event == null || !handleCoverTouch(view, event)) {
+                    chain.proceed()
+                } else {
+                    true
+                }
+            }
+            HdDebug.log(TAG, "cover dispatch hooked on " + cls.name)
+        }.onFailure { HdDebug.log(TAG, "cover dispatch hook failed: " + it) }
+    }
+
+    /** 触摸判定：只有横向拖动才接管并转给黑条；其余一律放行（不消费）。 */
+    private fun handleCoverTouch(cover: View, event: MotionEvent): Boolean {
+        val module = module ?: return false
+        val wrapper = synchronized(handleOwner) {
+            handleOwner.entries.firstOrNull { entry ->
+                runCatching { coverAccessor?.invoke(entry.value) === cover }.getOrDefault(false)
+            }?.value
+        } ?: return false
+        val handle = runCatching { handleAccessor?.invoke(wrapper) as? View }.getOrNull()
+            ?: return false
+        val state = gestureStates.getOrPut(wrapper) { FloatArray(2) }
+        val slop = (12 * cover.resources.displayMetrics.density).toInt().coerceAtLeast(16)
+        return when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                state[0] = event.rawX
+                state[1] = event.rawY
+                false
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val dx = kotlin.math.abs(event.rawX - state[0])
+                val dy = kotlin.math.abs(event.rawY - state[1])
+                if (dx < slop && dy < slop) {
+                    false
+                } else if (dx >= dy) {
+                    touchActivity(wrapper, handle)
+                    runCatching { handle.dispatchTouchEvent(event) }.getOrDefault(false)
+                } else {
+                    false
+                }
+            }
+            else -> false
+        }
     }
 
     private fun installTouchForwarding(module: XposedModule, wrapper: Any, cover: View, handle: View) {
