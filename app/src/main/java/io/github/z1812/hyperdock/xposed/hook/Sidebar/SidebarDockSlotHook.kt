@@ -1265,9 +1265,10 @@ object SidebarDockSlotHook : BaseHook() {
             if (source == null) {
                 chain.proceed()
             } else {
-                val merged = appendThirdPartyApps(module, chain.thisObject, source, loader)
-                HdDebug.log(TAG, "freeform list " + source.size + " → " + merged.size)
-                merged
+                // **不要**往面板列表里塞 a8.c 条目：面板侧（g0.J）会把它当 Model$c 强转，
+                // 点「添加常用应用」就 ClassCastException 闪退。原样返回，只记录条数。
+                HdDebug.log(TAG, "freeform list " + source.size + " (不注入)")
+                source
             }
         }
     }

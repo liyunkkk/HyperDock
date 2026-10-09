@@ -290,7 +290,8 @@ object SidebarHandleHook : BaseHook() {
             if (existing != null) {
                 cover.setOnTouchListener(existing)
             } else {
-                installTouchForwarding(module, wrapper, cover, handle)
+                runCatching { installTouchForwarding(module, wrapper, cover, handle) }
+                    .onFailure { HdDebug.log(TAG, "install forwarding failed: " + it) }
             }
         }
 
