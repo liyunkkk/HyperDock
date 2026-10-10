@@ -80,6 +80,9 @@ object SidebarHandleHook : BaseHook() {
     /** wrapper 实例 -> 是否已经包过触摸转发。 */
     private val touchWrapped = Collections.synchronizedMap(WeakHashMap<Any, Boolean>())
 
+    /** 上一次 applyTo 的状态快照，用于抑制重复日志。 */
+    private val lastApplySnapshot = Collections.synchronizedMap(WeakHashMap<Any, String>())
+
     /** 已经挂过 dispatchTouchEvent 的 cover 类（宿主换实例时类不变，所以挂类最稳）。 */
     private val coverDispatchHooked = Collections.synchronizedSet(HashSet<Class<*>>())
 
@@ -248,12 +251,14 @@ object SidebarHandleHook : BaseHook() {
         val handle = runCatching { handleAccessor?.invoke(wrapper) as? View }.getOrNull()
         runCatching {
             val wp = cover?.layoutParams as? WindowManager.LayoutParams
-            HdDebug.log(
-                TAG,
-                "applyTo cover=" + (cover != null) + " handle=" + (handle != null) +
-                    " scale=" + scaleFactor() + " wH=" + wp?.height +
-                    " attached=" + cover?.isAttachedToWindow + " base=" + baseHeights[wrapper],
-            )
+            val snapshot = "cover=" + (cover != null) + " handle=" + (handle != null) +
+                " scale=" + scaleFactor() + " wH=" + wp?.height +
+                " attached=" + cover?.isAttachedToWindow + " base=" + baseHeights[wrapper]
+            // 只在状态变化时落盘：applyTo 每帧都会被调用，无条件写会把其它日志冲掉
+            if (lastApplySnapshot[wrapper] != snapshot) {
+                lastApplySnapshot[wrapper] = snapshot
+                HdDebug.log(TAG, "applyTo " + snapshot)
+            }
         }
         if (handle != null) {
             handleOwner[handle] = wrapper

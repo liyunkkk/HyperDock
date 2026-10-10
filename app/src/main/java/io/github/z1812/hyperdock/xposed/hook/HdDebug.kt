@@ -14,7 +14,7 @@ import java.io.File
 internal object HdDebug {
 
     private const val FILE_NAME = "hyperdock-debug.log"
-    private const val MAX_BYTES = 64 * 1024
+    private const val MAX_BYTES = 512 * 1024
     private const val MAX_PENDING = 500
 
     /**
