@@ -1,5 +1,6 @@
 package io.github.z1812.hyperdock.xposed
 
+import io.github.z1812.hyperdock.xposed.hook.HdDebug
 import io.github.z1812.hyperdock.xposed.hook.Sidebar.SidebarCloseHook
 import io.github.z1812.hyperdock.xposed.hook.Sidebar.SidebarColumnsHook
 import io.github.z1812.hyperdock.xposed.hook.Sidebar.SidebarDockSlotHook
@@ -34,14 +35,30 @@ class HyperDockModule : XposedModule() {
 
         when (param.packageName) {
             "com.miui.securitycenter" -> {
-                SidebarDefaultExpandHook.init(this, param)
-                SidebarShortcutHook.init(this, param)
-                SidebarCloseHook.init(this, param)
-                SidebarColumnsHook.init(this, param)
-                SidebarDockSlotHook.init(this, param)
-                SidebarShorthandHook.init(this, param)
-                SidebarHandleHook.init(this, param)
-                SidebarAppLaunchHook.init(this, param)
+                runCatching { SidebarDefaultExpandHook.init(this, param) }
+                    .onFailure { HdDebug.log("Module", "SidebarDefaultExpandHook init 失败: " + it) }
+                HdDebug.log("Module", "SidebarDefaultExpandHook init 已调用")
+                runCatching { SidebarShortcutHook.init(this, param) }
+                    .onFailure { HdDebug.log("Module", "SidebarShortcutHook init 失败: " + it) }
+                HdDebug.log("Module", "SidebarShortcutHook init 已调用")
+                runCatching { SidebarCloseHook.init(this, param) }
+                    .onFailure { HdDebug.log("Module", "SidebarCloseHook init 失败: " + it) }
+                HdDebug.log("Module", "SidebarCloseHook init 已调用")
+                runCatching { SidebarColumnsHook.init(this, param) }
+                    .onFailure { HdDebug.log("Module", "SidebarColumnsHook init 失败: " + it) }
+                HdDebug.log("Module", "SidebarColumnsHook init 已调用")
+                runCatching { SidebarDockSlotHook.init(this, param) }
+                    .onFailure { HdDebug.log("Module", "SidebarDockSlotHook init 失败: " + it) }
+                HdDebug.log("Module", "SidebarDockSlotHook init 已调用")
+                runCatching { SidebarShorthandHook.init(this, param) }
+                    .onFailure { HdDebug.log("Module", "SidebarShorthandHook init 失败: " + it) }
+                HdDebug.log("Module", "SidebarShorthandHook init 已调用")
+                runCatching { SidebarHandleHook.init(this, param) }
+                    .onFailure { HdDebug.log("Module", "SidebarHandleHook init 失败: " + it) }
+                HdDebug.log("Module", "SidebarHandleHook init 已调用")
+                runCatching { SidebarAppLaunchHook.init(this, param) }
+                    .onFailure { HdDebug.log("Module", "SidebarAppLaunchHook init 失败: " + it) }
+                HdDebug.log("Module", "SidebarAppLaunchHook init 已调用")
             }
             "com.android.systemui" -> {
                 SidebarQsBridgeHook.init(this, param)

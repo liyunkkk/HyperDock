@@ -94,9 +94,10 @@ object SidebarDockSlotHook : BaseHook() {
     override fun onInit(module: XposedModule, param: PackageLoadedParam) {
         val processName = runCatching { Application.getProcessName() }.getOrNull().orEmpty()
         if (!isUiProcess(param.packageName, processName)) return
+        HdDebug.log(TAG, "onInit 开始")
         val loader = runCatching { param.defaultClassLoader }.getOrNull()
         if (loader == null) {
-            logWarn(module, "no class loader; dock slot disabled")
+            HdDebug.log(TAG, "no class loader; dock slot disabled")
             return
         }
         hookDockHeightList(module, loader)
@@ -109,21 +110,23 @@ object SidebarDockSlotHook : BaseHook() {
         // smoothScrollToPosition 分支 → RecyclerView 已 detach → NPE 闪退
         // （dropbox 里 y.q → r0.d → p0.z ← AllAppsEventBus 那条）。
         turboClass = runCatching { Class.forName(TURBO_LAYOUT_CLASS, false, loader) }.getOrNull()
+        HdDebug.log(TAG, "turboClass=" + turboClass)
         if (turboClass == null) {
-            logWarn(module, "TurboLayout unavailable; dock slot disabled")
+            HdDebug.log(TAG, "TurboLayout unavailable; dock slot disabled")
             return
         }
         val rvClass = runCatching { Class.forName(RECYCLER_VIEW_CLASS, false, loader) }.getOrNull()
         val adapterClass = runCatching { Class.forName(ADAPTER_CLASS, false, loader) }.getOrNull()
         holderClass = runCatching { Class.forName(VIEW_HOLDER_CLASS, false, loader) }.getOrNull()
+        HdDebug.log(TAG, "rv=" + rvClass + " adapter=" + adapterClass)
         if (rvClass == null || adapterClass == null) {
-            logWarn(module, "RecyclerView unavailable; dock slot disabled")
+            HdDebug.log(TAG, "RecyclerView unavailable; dock slot disabled")
             return
         }
         val setAdapter = runCatching { rvClass.getMethod("setAdapter", adapterClass) }.getOrNull()
         val getAdapter = runCatching { rvClass.getMethod("getAdapter") }.getOrNull()
         if (setAdapter == null) {
-            logWarn(module, "setAdapter unavailable; dock slot disabled")
+            HdDebug.log(TAG, "setAdapter unavailable; dock slot disabled")
             return
         }
         setAdapter.isAccessible = true
