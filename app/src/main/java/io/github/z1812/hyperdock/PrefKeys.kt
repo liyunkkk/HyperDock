@@ -52,6 +52,9 @@ object PrefKeys {
      * 「调整位置模式」：开启时强制常亮小横条（忽略闲置自动隐藏），
      * 方便用户看到并拖动它来调整侧滑触发位置；调好后关掉即恢复隐藏。
      */
+    /** 完全隐藏小横条：黑条永不显示（触摸也不恢复），但侧滑触摸区域照常工作。 */
+    const val SIDEBAR_HANDLE_HIDDEN = "sidebar_handle_hidden"
+
     const val SIDEBAR_HANDLE_LOCATE_MODE = "sidebar_handle_locate_mode"
 
     /**
@@ -149,6 +152,7 @@ object PrefKeys {
         SIDEBAR_AUTO_CLOSE_MODE,
         SIDEBAR_HANDLE_IDLE_HIDE,
         SIDEBAR_HANDLE_LOCATE_MODE,
+        SIDEBAR_HANDLE_HIDDEN,
         SIDEBAR_TOUCH_SCALE,
         SIDEBAR_APP_OPEN_MODE,
         SIDEBAR_RECENT_APPS,
@@ -175,6 +179,7 @@ object PrefKeys {
         SIDEBAR_AUTO_CLOSE_MODE,
         SIDEBAR_HANDLE_IDLE_HIDE,
         SIDEBAR_HANDLE_LOCATE_MODE,
+        SIDEBAR_HANDLE_HIDDEN,
         SIDEBAR_TOUCH_SCALE,
         SIDEBAR_APP_OPEN_MODE,
         SIDEBAR_RECENT_APPS,

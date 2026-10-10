@@ -218,15 +218,34 @@ object SidebarDockSlotHook : BaseHook() {
      */
     private fun muteChangeAnimation(module: XposedModule, view: View) {
         if (changeAnimationMuted) return
-        // 用户反馈：两列布局切换 / 重装占格表会触发 RecyclerView 自带的 move 动画，
-        // 视觉上就是「图标从两边往中间汇聚」。要让图标直接落位，必须把 change、move、
-        // add、remove 四类时长全部置 0（只关 change 不够，汇聚是 move）。
+        // 用户要图标滑出时直接落位、没有「从两边汇聚」的位移动画。最彻底的办法是
+        // 直接把 RecyclerView 的 ItemAnimator 摘掉（setItemAnimator(null)），
+        // 这样 move/add/remove/change 全部不做动画。之前先读 getItemAnimator，
+        // 拿到 null 就 return，导致什么都没做 —— 这里反过来，优先摘除。
+        val animatorSetter = view.javaClass.methods.firstOrNull {
+            it.name == "setItemAnimator" && it.parameterCount == 1
+        }
+        if (animatorSetter != null) {
+            val removed = runCatching {
+                animatorSetter.isAccessible = true
+                animatorSetter.invoke(view, null)
+            }.isSuccess
+            if (removed) {
+                changeAnimationMuted = true
+                log(module, "item animator removed on dock list (no move anim)")
+                return
+            }
+        }
+        // 兜底：摘不掉就把四类时长全部置 0。
         val animator = runCatching {
             val getter = view.javaClass.getMethod("getItemAnimator")
             getter.isAccessible = true
             getter.invoke(view)
         }.getOrNull()
-        if (animator == null) return
+        if (animator == null) {
+            logWarn(module, "cannot mute: itemAnimator null and setter unavailable")
+            return
+        }
         var zeroed = 0
         listOf("setChangeDuration", "setMoveDuration", "setAddDuration", "setRemoveDuration").forEach { name ->
             runCatching {
@@ -239,35 +258,10 @@ object SidebarDockSlotHook : BaseHook() {
         if (zeroed > 0) {
             changeAnimationMuted = true
             log(module, "item animations muted on dock list (zeroed=$zeroed)")
-            return
-        }
-        // 兜底：R8 把时长 setter 改名了，直接把动画器摘掉（图标无任何动画，直接落位）。
-        val animatorSetter = view.javaClass.methods.firstOrNull {
-            it.name == "setItemAnimator" && it.parameterCount == 1
-        }
-        val removed = animatorSetter?.let {
-            runCatching {
-                it.isAccessible = true
-                it.invoke(view, null)
-            }.isSuccess
-        } == true
-        if (removed) {
-            changeAnimationMuted = true
-            log(module, "item animator removed on dock list")
         } else {
             logWarn(module, "cannot mute item animation on dock list")
         }
     }
-
-    /**
-     * 确认这个 RecyclerView 是侧边栏列表后接管它的 adapter。
-     *
-     * **必须先 `prepareAdapter` 成功再写 `adapterInstance`**：宿主侧边栏窗口里还有别的
-     * 列表（`n9.e`、全部应用的 `com.miui.dock.allapps.b` 等），它们都没有
-     * `submitList(List, boolean)`，一旦先把引用抢走，正在工作的那个 adapter 就会因为
-     * 提交拦截器里的身份校验（`thisObject !== adapterInstance`）被整体跳过 ——
-     * 表现为槽位图标时有时无、而且 `displayList` 不再更新导致分割线下方的应用错位。
-     */
     private fun claim(module: XposedModule, view: View, adapter: Any) {
         if (adapterInstance === adapter) return
         if (!isDockRecycler(view)) return

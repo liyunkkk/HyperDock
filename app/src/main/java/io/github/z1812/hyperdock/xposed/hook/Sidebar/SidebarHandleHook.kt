@@ -332,6 +332,12 @@ object SidebarHandleHook : BaseHook() {
     }
 
     private fun showHandle(wrapper: Any, handle: View, resetTimer: Boolean) {
+        // 完全隐藏模式：无论什么入口（触摸、宿主兜底、打开侧边栏）都不恢复黑条，
+        // 并顺手把当前可能显示着的黑条清掉。这样「滑动小黑条又出来」就不会发生。
+        if (fullyHiddenEnabled()) {
+            mainHandler.post { hideHandleNow(wrapper, handle) }
+            return
+        }
         mainHandler.post {
             runCatching {
                 val own = ownBars[wrapper]
@@ -351,6 +357,19 @@ object SidebarHandleHook : BaseHook() {
                 }
             }
             if (resetTimer) resetIdleTimer(wrapper)
+        }
+    }
+
+    /** 立即把黑条清掉（完全隐藏模式用）：自绘条清背景，原生条清 drawable。 */
+    private fun hideHandleNow(wrapper: Any, handle: View) {
+        runCatching {
+            val own = ownBars[wrapper]
+            if (own != null) {
+                val cover = coverAccessor?.invoke(wrapper) as? View
+                if (cover != null && cover.background === own) cover.background = null
+            } else {
+                (handle as? ImageView)?.let { if (it.drawable != null) it.setImageDrawable(null) }
+            }
         }
     }
 
@@ -648,6 +667,10 @@ object SidebarHandleHook : BaseHook() {
     /** 「调整位置模式」开着时强制常亮小横条，便于拖动定位。 */
     private fun locateModeEnabled(): Boolean =
         ConfigManager.getBoolean(PrefKeys.SIDEBAR_HANDLE_LOCATE_MODE, false)
+
+    /** 「完全隐藏」：黑条永不显示，触摸也不恢复（调整位置模式可临时覆盖）。 */
+    private fun fullyHiddenEnabled(): Boolean =
+        !locateModeEnabled() && ConfigManager.getBoolean(PrefKeys.SIDEBAR_HANDLE_HIDDEN, false)
 
     private fun idleHideEnabled(): Boolean =
         // 调整位置模式优先：开着时一律不自动隐藏，保证黑条始终可见可拖。

@@ -78,6 +78,8 @@
     <string name="sidebar_handle_idle_hide_summary">The bar stays visible and hides itself after a few seconds without touch; touching the sidebar brings it back</string>
     <string name="sidebar_handle_locate_mode">Position adjust mode</string>
     <string name="sidebar_handle_locate_mode_summary">Temporarily force the handle bar to stay visible so you can drag it to adjust the swipe trigger position; turn off to restore hiding</string>
+    <string name="sidebar_handle_hidden">Fully hide handle bar</string>
+    <string name="sidebar_handle_hidden_summary">The handle bar never shows, even on touch; the swipe gesture still works. Turn on Position adjust mode below when you need to reposition it</string>
     <string name="sidebar_app_open_mode">Open apps in</string>
     <string name="sidebar_app_open_mode_summary">How sidebar entries open by default; the long-press menu shows the other one plus split screen</string>
     <string name="sidebar_app_open_fullscreen">Full screen</string>
