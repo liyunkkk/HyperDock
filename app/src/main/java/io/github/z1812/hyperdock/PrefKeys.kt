@@ -49,6 +49,12 @@ object PrefKeys {
     const val SIDEBAR_HANDLE_IDLE_HIDE = "sidebar_handle_idle_hide"
 
     /**
+     * 「调整位置模式」：开启时强制常亮小横条（忽略闲置自动隐藏），
+     * 方便用户看到并拖动它来调整侧滑触发位置；调好后关掉即恢复隐藏。
+     */
+    const val SIDEBAR_HANDLE_LOCATE_MODE = "sidebar_handle_locate_mode"
+
+    /**
      * 小横条触摸面积加长倍数。收起态可拖拽区域 = cover view 窗口高度 × 本倍率，
      * 取值为 [TOUCH_SCALE_MODES] 里的字符串；`off` = 保持原生。
      */
@@ -142,6 +148,7 @@ object PrefKeys {
         SIDEBAR_QUICK_SLOT,
         SIDEBAR_AUTO_CLOSE_MODE,
         SIDEBAR_HANDLE_IDLE_HIDE,
+        SIDEBAR_HANDLE_LOCATE_MODE,
         SIDEBAR_TOUCH_SCALE,
         SIDEBAR_APP_OPEN_MODE,
         SIDEBAR_RECENT_APPS,
@@ -167,6 +174,7 @@ object PrefKeys {
         SIDEBAR_QUICK_SLOT,
         SIDEBAR_AUTO_CLOSE_MODE,
         SIDEBAR_HANDLE_IDLE_HIDE,
+        SIDEBAR_HANDLE_LOCATE_MODE,
         SIDEBAR_TOUCH_SCALE,
         SIDEBAR_APP_OPEN_MODE,
         SIDEBAR_RECENT_APPS,

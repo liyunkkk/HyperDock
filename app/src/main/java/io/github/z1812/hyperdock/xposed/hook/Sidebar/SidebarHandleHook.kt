@@ -645,8 +645,13 @@ object SidebarHandleHook : BaseHook() {
         HdDebug.log(TAG, message)
     }
 
+    /** 「调整位置模式」开着时强制常亮小横条，便于拖动定位。 */
+    private fun locateModeEnabled(): Boolean =
+        ConfigManager.getBoolean(PrefKeys.SIDEBAR_HANDLE_LOCATE_MODE, false)
+
     private fun idleHideEnabled(): Boolean =
-        ConfigManager.getBoolean(PrefKeys.SIDEBAR_HANDLE_IDLE_HIDE, true)
+        // 调整位置模式优先：开着时一律不自动隐藏，保证黑条始终可见可拖。
+        !locateModeEnabled() && ConfigManager.getBoolean(PrefKeys.SIDEBAR_HANDLE_IDLE_HIDE, true)
 
     private fun scaleFactor(): Int {
         // 触摸面积倍率照设置生效：只放大 cover 窗口高度，**不再安装整层转发**

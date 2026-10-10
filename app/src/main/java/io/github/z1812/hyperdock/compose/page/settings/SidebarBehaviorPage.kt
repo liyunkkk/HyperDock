@@ -54,6 +54,7 @@ internal fun SidebarBehaviorPage(
 ) {
     val quickSlotLabel = rememberQuickSlotLabel(prefs)
     val handleIdleHide = rememberBooleanPreference(prefs, PrefKeys.SIDEBAR_HANDLE_IDLE_HIDE, true)
+    val handleLocateMode = rememberBooleanPreference(prefs, PrefKeys.SIDEBAR_HANDLE_LOCATE_MODE, false)
     val touchScale = rememberStringPreference(prefs, PrefKeys.SIDEBAR_TOUCH_SCALE, PrefKeys.TOUCH_SCALE_OFF)
     val appOpenMode = rememberStringPreference(prefs, PrefKeys.SIDEBAR_APP_OPEN_MODE, PrefKeys.APP_OPEN_FULLSCREEN)
     val recentApps = rememberBooleanPreference(prefs, PrefKeys.SIDEBAR_RECENT_APPS, true)
@@ -237,6 +238,15 @@ internal fun SidebarBehaviorPage(
                 ) {
                     handleIdleHide.value = it
                     prefs.putBoolean(PrefKeys.SIDEBAR_HANDLE_IDLE_HIDE, it)
+                }
+                PreferenceSwitch(
+                    title = stringResource(R.string.sidebar_handle_locate_mode),
+                    summary = stringResource(R.string.sidebar_handle_locate_mode_summary),
+                    icon = null,
+                    checked = handleLocateMode.value,
+                ) {
+                    handleLocateMode.value = it
+                    prefs.putBoolean(PrefKeys.SIDEBAR_HANDLE_LOCATE_MODE, it)
                 }
                 PreferenceDropdown(
                     title = stringResource(R.string.sidebar_app_open_mode),
