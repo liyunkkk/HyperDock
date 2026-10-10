@@ -465,9 +465,15 @@ object SidebarColumnsHook : BaseHook() {
     internal fun reassertSpanLookup(grid: Any?) {
         val instance = spanLookupInstance ?: return
         val setter = spanLookupSetter ?: return
-        val target = grid ?: return
+        val raw = grid ?: return
+        // 传进来的往往是 RecyclerView（宿主叫 FadingEdgeRecyclerView），
+        // 而 setter 的接收者必须是 GridLayoutManager —— 之前直接把 RecyclerView 丢进去，
+        // 每次都 IllegalArgumentException，占格逻辑根本没挂上（表现：单双行交替）。
+        val target = runCatching {
+            raw.javaClass.getMethod("getLayoutManager").invoke(raw)
+        }.getOrNull() ?: raw
         runCatching { setter.invoke(target, instance) }
-            .onSuccess { HdDebug.log("Columns", "span lookup reasserted") }
+            .onSuccess { HdDebug.log("Columns", "span lookup reasserted on " + target.javaClass.simpleName) }
             .onFailure { HdDebug.log("Columns", "span lookup reassert failed: $it") }
     }
 
