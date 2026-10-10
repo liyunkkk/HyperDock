@@ -94,6 +94,10 @@ object SidebarDockSlotHook : BaseHook() {
     override fun onInit(module: XposedModule, param: PackageLoadedParam) {
         val processName = runCatching { Application.getProcessName() }.getOrNull().orEmpty()
         if (!isUiProcess(param.packageName, processName)) return
+        runCatching {
+            java.io.File("/data/data/com.miui.securitycenter/files/hyperdock-init.log")
+                .appendText(System.currentTimeMillis().toString() + " DockSlot onInit 开始\n")
+        }
         HdDebug.log(TAG, "onInit 开始")
         val loader = runCatching { param.defaultClassLoader }.getOrNull()
         if (loader == null) {
@@ -111,6 +115,10 @@ object SidebarDockSlotHook : BaseHook() {
         // （dropbox 里 y.q → r0.d → p0.z ← AllAppsEventBus 那条）。
         turboClass = runCatching { Class.forName(TURBO_LAYOUT_CLASS, false, loader) }.getOrNull()
         HdDebug.log(TAG, "turboClass=" + turboClass)
+        runCatching {
+            java.io.File("/data/data/com.miui.securitycenter/files/hyperdock-init.log")
+                .appendText(System.currentTimeMillis().toString() + " turboClass=" + turboClass + "\n")
+        }
         if (turboClass == null) {
             HdDebug.log(TAG, "TurboLayout unavailable; dock slot disabled")
             return

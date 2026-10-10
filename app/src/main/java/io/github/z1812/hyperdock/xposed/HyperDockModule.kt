@@ -33,6 +33,13 @@ class HyperDockModule : XposedModule() {
             return
         }
 
+        runCatching {
+            java.io.File("/data/data/com.miui.securitycenter/files/hyperdock-init.log")
+                .appendText(
+                    System.currentTimeMillis().toString() +
+                        " onPackageLoaded pkg=" + param.packageName + "\n",
+                )
+        }
         when (param.packageName) {
             "com.miui.securitycenter" -> {
                 runCatching { SidebarDefaultExpandHook.init(this, param) }
@@ -50,6 +57,10 @@ class HyperDockModule : XposedModule() {
                 runCatching { SidebarDockSlotHook.init(this, param) }
                     .onFailure { HdDebug.log("Module", "SidebarDockSlotHook init 失败: " + it) }
                 HdDebug.log("Module", "SidebarDockSlotHook init 已调用")
+                runCatching {
+                    java.io.File("/data/data/com.miui.securitycenter/files/hyperdock-init.log")
+                        .appendText(System.currentTimeMillis().toString() + " DockSlot init 已调用\n")
+                }
                 runCatching { SidebarShorthandHook.init(this, param) }
                     .onFailure { HdDebug.log("Module", "SidebarShorthandHook init 失败: " + it) }
                 HdDebug.log("Module", "SidebarShorthandHook init 已调用")
