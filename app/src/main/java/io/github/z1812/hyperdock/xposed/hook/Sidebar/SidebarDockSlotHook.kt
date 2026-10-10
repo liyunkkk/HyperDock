@@ -1119,43 +1119,56 @@ object SidebarDockSlotHook : BaseHook() {
     private fun applyGlassDivider(itemView: View) {
         val context = itemView.context ?: return
         resolveResources(context)
-        val divider = if (dividerResId != 0) itemView.findViewById<View>(dividerResId) else null
-        if (divider == null) {
-            // 新宿主没有分割线条目类，这条是自造条目，复用的却是**应用行布局**（整行高），
-            // 于是留下一个整行高的空位 —— 就是用户看到的"空格占位"。
-            // 把行高收成一条线的高度，并记下原始行高给应用行还原。
-            itemView.visibility = View.VISIBLE
-            val density = itemView.resources.displayMetrics.density
-            val rowHeight = (lineHeight(itemView) * 3).coerceAtLeast((14 * density).toInt())
-            val lp = itemView.layoutParams
-            if (lp != null) {
-                if (originalRowHeight[itemView.javaClass] == null) {
-                    originalRowHeight[itemView.javaClass] = lp.height
-                }
+        val density = itemView.resources.displayMetrics.density
+
+        // 这条分割线是自造条目，复用的是**应用行布局**（整行高 + 图标 + 占位图）。
+        // 无论宿主行里有没有现成的 divider 子 view，都要做三件事，否则就会出现
+        // 用户看到的「上方空出一整行」和「复用图标残留重复显示」：
+        //   1) 把行高收成一条线的高度（记下原始行高给应用行还原）；
+        //   2) 把这一行里残留的图标 / 占位图 / 其它子 view 全部藏掉；
+        //   3) 画出真正的分割线（有 divider 子 view 用它，没有就用 foreground）。
+        itemView.visibility = View.VISIBLE
+        val height = lineHeight(itemView)
+        val rowHeight = (height * 3).coerceAtLeast((14 * density).toInt())
+        val lp = itemView.layoutParams
+        if (lp != null) {
+            if (originalRowHeight[itemView.javaClass] == null) {
+                originalRowHeight[itemView.javaClass] = lp.height
+            }
+            if (lp.height != rowHeight) {
                 lp.height = rowHeight
                 itemView.layoutParams = lp
             }
-            itemView.foreground = LiquidGlassLineDrawable(lineHeight(itemView))
-            HdDebug.log(TAG, "divider proxy line drawn h=" + rowHeight)
-            return
         }
-        divider.visibility = View.VISIBLE
-        val density = itemView.resources.displayMetrics.density
+
+        val divider = if (dividerResId != 0) itemView.findViewById<View>(dividerResId) else null
+
+        // 藏掉复用过来的图标 / 占位图：这是「重复多出来一个图标」的来源。
+        // 安全性：应用行在 afterBind 里会把图标重新置 VISIBLE、占位图置 GONE，
+        // 所以这里藏掉不会污染后续被复用到应用行的 holder。
+        runCatching { (itemView.findViewById<View>(iconResId))?.visibility = View.GONE }
+        runCatching { (itemView.findViewById<View>(placeholderResId))?.visibility = View.GONE }
+
         val inset = if (paddingPx > 0) paddingPx else (12 * density).toInt()
-        val height = lineHeight(itemView)
-        val params = divider.layoutParams as? ViewGroup.MarginLayoutParams
-        if (params != null) {
-            params.width = ViewGroup.LayoutParams.MATCH_PARENT
-            params.height = height
-            params.leftMargin = inset
-            params.rightMargin = inset
-            divider.layoutParams = params
+        if (divider != null) {
+            divider.visibility = View.VISIBLE
+            val params = divider.layoutParams as? ViewGroup.MarginLayoutParams
+            if (params != null) {
+                params.width = ViewGroup.LayoutParams.MATCH_PARENT
+                params.height = height
+                params.leftMargin = inset
+                params.rightMargin = inset
+                divider.layoutParams = params
+            } else {
+                divider.layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, height)
+            }
+            divider.background = LiquidGlassLineDrawable(height)
+            itemView.foreground = null
         } else {
-            divider.layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, height)
+            itemView.foreground = LiquidGlassLineDrawable(height)
         }
-        divider.background = LiquidGlassLineDrawable(height)
         if (itemView.hashCode() % 7 == 0) {
-            HdDebug.log(TAG, "divider styled(light): inset=" + inset + " height=" + height)
+            HdDebug.log(TAG, "divider drawn: rowH=" + rowHeight + " lineH=" + height + " hasChild=" + (divider != null))
         }
     }
 
