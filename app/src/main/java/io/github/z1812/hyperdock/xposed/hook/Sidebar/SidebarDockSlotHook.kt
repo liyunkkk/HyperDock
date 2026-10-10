@@ -115,6 +115,7 @@ object SidebarDockSlotHook : BaseHook() {
         hookFreeformFilter(module, loader)
         hookPanelTitles(module, loader)
         hookPanelList(module, loader)
+        hookPanelSubmitList(module, loader)
         // 注意：**不要**再往宿主自己的数据列表（z7.u.f()）里塞条目。
         // 宿主的「刷新列表」路径会遍历它，塞进去会让它在侧边栏已关闭时走
         // smoothScrollToPosition 分支 → RecyclerView 已 detach → NPE 闪退
@@ -1519,6 +1520,38 @@ object SidebarDockSlotHook : BaseHook() {
             TAG,
             "panel list hooks=" + hooked + " classes=" + candidates.joinToString(",") { it.simpleName },
         )
+    }
+
+    /**
+     * 最终兜底：面板列表经协程拼好后，由 adapter 的 AsyncListDiffer.submitList 提交。
+     * androidx 未混淆，直接 hook 它，把参数里「带推荐应用标题」的列表就地替换成删掉
+     * 推荐组后的版本。用标题 resId 守卫，其它列表（侧边栏本体等）一律不动。
+     */
+    private fun hookPanelSubmitList(module: XposedModule, loader: ClassLoader) {
+        val differ = runCatching {
+            Class.forName("androidx.recyclerview.widget.AsyncListDiffer", false, loader)
+        }.getOrNull()
+        if (differ == null) {
+            HdDebug.log(TAG, "AsyncListDiffer not found")
+            return
+        }
+        var hooked = 0
+        differ.declaredMethods
+            .filter { it.name == "submitList" && it.parameterCount >= 1 && it.parameterTypes[0] == List::class.java }
+            .forEach { method ->
+                method.isAccessible = true
+                runCatching {
+                    module.hook(method).intercept { chain ->
+                        val raw = chain.args.getOrNull(0) as? List<Any>
+                        if (raw != null && raw.any { isPanelTitle(it) && titleResId(it) == 2131886858 }) {
+                            chain.args[0] = filterRecommendGroup(module, raw)
+                        }
+                        chain.proceed()
+                    }
+                    hooked++
+                }
+            }
+        HdDebug.log(TAG, "submitList hooks=" + hooked)
     }
 
     /** 删掉「推荐应用」那一组；顺带把统计打进日志。 */
