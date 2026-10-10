@@ -218,27 +218,30 @@ object SidebarDockSlotHook : BaseHook() {
      */
     private fun muteChangeAnimation(module: XposedModule, view: View) {
         if (changeAnimationMuted) return
+        // 用户反馈：两列布局切换 / 重装占格表会触发 RecyclerView 自带的 move 动画，
+        // 视觉上就是「图标从两边往中间汇聚」。要让图标直接落位，必须把 change、move、
+        // add、remove 四类时长全部置 0（只关 change 不够，汇聚是 move）。
         val animator = runCatching {
             val getter = view.javaClass.getMethod("getItemAnimator")
             getter.isAccessible = true
             getter.invoke(view)
         }.getOrNull()
         if (animator == null) return
-        val setter = runCatching {
-            animator.javaClass.getMethod("setChangeDuration", Long::class.javaPrimitiveType)
-        }.getOrNull()
-        if (setter != null) {
-            val ok = runCatching {
-                setter.isAccessible = true
-                setter.invoke(animator, 0L)
-            }.isSuccess
-            if (ok) {
-                changeAnimationMuted = true
-                log(module, "item change animation muted on dock list")
-                return
+        var zeroed = 0
+        listOf("setChangeDuration", "setMoveDuration", "setAddDuration", "setRemoveDuration").forEach { name ->
+            runCatching {
+                val m = animator.javaClass.getMethod(name, Long::class.javaPrimitiveType)
+                m.isAccessible = true
+                m.invoke(animator, 0L)
+                zeroed++
             }
         }
-        // 兜底：直接把动画器摘掉。宿主 R8 可能把 setChangeDuration 改名了。
+        if (zeroed > 0) {
+            changeAnimationMuted = true
+            log(module, "item animations muted on dock list (zeroed=$zeroed)")
+            return
+        }
+        // 兜底：R8 把时长 setter 改名了，直接把动画器摘掉（图标无任何动画，直接落位）。
         val animatorSetter = view.javaClass.methods.firstOrNull {
             it.name == "setItemAnimator" && it.parameterCount == 1
         }
