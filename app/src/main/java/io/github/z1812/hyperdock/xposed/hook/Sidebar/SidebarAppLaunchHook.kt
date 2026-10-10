@@ -90,8 +90,10 @@ object SidebarAppLaunchHook : BaseHook() {
         }
         HdDebug.log(TAG, "onInit fullscreen=${fullscreenLaunch?.name} smallWindow=${smallWindowLaunch?.name}")
         if (fullscreenLaunch == null || smallWindowLaunch == null) {
-            logWarn(module, "launch helpers not found; open-mode switch disabled")
-            return
+            // 新宿主（13.6.6）把 e0 换成了只剩 invoke() 的东西，静态启动方法整体搬走。
+            // 这里**不能 return** —— 一 return 连"点击强制全屏/长按菜单接管"都没了，
+            // 表现就是点击退回小窗、长按不出菜单。改为继续安装其余 hook。
+            HdDebug.log(TAG, "宿主启动助手缺失，走自启兜底")
         }
 
         val launcher = runCatching { Class.forName(LAUNCHER_CLASS, false, loader) }.getOrNull()
@@ -273,8 +275,15 @@ object SidebarAppLaunchHook : BaseHook() {
 
     private fun launchFullscreen(context: Context?, intent: Intent?, uid: Int): Boolean {
         if (context == null || intent == null) return false
+        val helper = fullscreenLaunch
         return runCatching {
-            fullscreenLaunch?.invoke(null, context, intent, uid)
+            if (helper != null) {
+                helper.invoke(null, context, intent, uid)
+            } else {
+                // 兜底：不依赖宿主任何工具类，自己起 Activity —— 这就是全屏打开。
+                context.startActivity(Intent(intent).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                HdDebug.log(TAG, "自启全屏 " + intent.component?.packageName)
+            }
             true
         }.getOrDefault(false)
     }
