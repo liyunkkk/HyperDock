@@ -64,15 +64,29 @@ object SidebarAppLaunchHook : BaseHook() {
 
         HdDebug.log(TAG, "resolving launch helpers")
         val util = runCatching { Class.forName(UTIL_CLASS, false, loader) }.getOrNull()
+        // 按**签名**匹配，不再写死方法名（新宿主把 g0/Z 改名了，写死名字会解析成 null，
+        // 表现就是"默认全屏失效、退回宿主自己的小窗"）。
         fullscreenLaunch = util?.declaredMethods?.firstOrNull { method ->
-            method.name == "g0" && method.parameterCount == 3 &&
+            method.parameterCount == 3 &&
                 method.parameterTypes[0] == Context::class.java &&
-                method.parameterTypes[1] == Intent::class.java
+                method.parameterTypes[1] == Intent::class.java &&
+                method.parameterTypes[2] == Integer.TYPE &&
+                method.returnType == Void.TYPE
         }
         smallWindowLaunch = util?.declaredMethods?.firstOrNull { method ->
-            method.name == "Z" && method.parameterCount == 4 &&
+            method.parameterCount == 4 &&
                 method.parameterTypes[0] == Context::class.java &&
-                method.parameterTypes[1] == Intent::class.java
+                method.parameterTypes[1] == Intent::class.java &&
+                method.parameterTypes[2] == String::class.java &&
+                method.parameterTypes[3] == Integer.TYPE &&
+                method.returnType == Void.TYPE
+        }
+        runCatching {
+            val all = util?.declaredMethods?.joinToString("; ") { m ->
+                m.name + "(" + m.parameterTypes.joinToString(",") { it.simpleName } + ")->" +
+                    m.returnType.simpleName
+            }
+            HdDebug.log(TAG, "e0 methods: " + all)
         }
         HdDebug.log(TAG, "onInit fullscreen=${fullscreenLaunch?.name} smallWindow=${smallWindowLaunch?.name}")
         if (fullscreenLaunch == null || smallWindowLaunch == null) {
