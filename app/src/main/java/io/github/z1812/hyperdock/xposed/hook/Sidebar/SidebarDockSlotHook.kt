@@ -711,6 +711,21 @@ object SidebarDockSlotHook : BaseHook() {
             HdDebug.log(TAG, "divider bound at position=" + position)
             return
         }
+
+        // 普通应用行：占位图必须 GONE —— INVISIBLE 仍然占位，会把格子顶歪（实测日志里
+        // 常用应用行是 phVis=4，也就是"占着位置的空白"），同时保证图标可见、分割线隐藏。
+        runCatching {
+            itemView.findViewById<View>(placeholderResId)?.visibility = View.GONE
+            if (dividerResId != 0) itemView.findViewById<View>(dividerResId)?.visibility = View.GONE
+            (itemView.findViewById<View>(iconResId) as? ImageView)?.visibility = View.VISIBLE
+        }
+        // 布局完成后记录真实尺寸，用于定位"单双交替"
+        itemView.post {
+            HdDebug.log(
+                TAG,
+                "layout pos=" + position + " w=" + itemView.width + " h=" + itemView.height
+            )
+        }
         // ViewHolder 是复用的：我们注入的分割线条目会把图标藏掉、把线显示出来，
         // 而这个 holder 回收给普通应用行时宿主既不重置图标可见性、也从不主动 hide 线，
         // 于是第一屏会「空位 + 串线」，重新布局换一批 holder 才正常。这里统一清干净。
