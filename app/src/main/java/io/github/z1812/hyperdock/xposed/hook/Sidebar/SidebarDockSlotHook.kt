@@ -1170,6 +1170,21 @@ object SidebarDockSlotHook : BaseHook() {
         if (itemView.hashCode() % 7 == 0) {
             HdDebug.log(TAG, "divider drawn: rowH=" + rowHeight + " lineH=" + height + " hasChild=" + (divider != null))
         }
+
+        // 关键：首次滑出时这次绑定发生在 RecyclerView 当前布局过程中，上面的
+        // requestLayout 被系统抑制，于是这一轮仍按应用行旧高度(165)把分割线量成
+        // 一整行空白；要等「打开全部面板再返回」触发全新布局才收窄。
+        // 这里 post 一轮：在当前布局结束后强制再排一次，把 39 的高度读进去，
+        // 等于把那次"返回才发生的重排"在首次滑出时就主动触发。
+        itemView.post {
+            val lp2 = itemView.layoutParams
+            if (lp2 != null && lp2.height != rowHeight) {
+                lp2.height = rowHeight
+                itemView.layoutParams = lp2
+            } else {
+                itemView.requestLayout()
+            }
+        }
     }
 
     private fun lineHeight(view: View): Int {
