@@ -92,6 +92,9 @@ object SidebarDockSlotHook : BaseHook() {
     /** 应用行的原始行高（按视图类记）：自造分割线会临时改行高，应用行必须能还原。 */
     private val originalRowHeight = Collections.synchronizedMap(WeakHashMap<Class<*>, Int>())
 
+    /** 「全部小窗应用」过滤方法所在的仓库类（AllAppsRepository），面板列表可能在它里面拼。 */
+    @Volatile private var freeformFilterClass: Class<*>? = null
+
     override fun getTag() = TAG
 
     override fun onInit(module: XposedModule, param: PackageLoadedParam) {
@@ -1339,6 +1342,7 @@ object SidebarDockSlotHook : BaseHook() {
             return
         }
         method.isAccessible = true
+        freeformFilterClass = method.declaringClass
         HdDebug.log(TAG, "freeform filter=" + method.declaringClass.simpleName + "." + method.name)
         module.hook(method).intercept { chain ->
             val source = chain.args.firstOrNull { it is List<*> } as? List<Any>
@@ -1463,12 +1467,16 @@ object SidebarDockSlotHook : BaseHook() {
      */
     private fun hookPanelList(module: XposedModule, loader: ClassLoader) {
         val candidates = ArrayList<Class<*>>()
-        listOf(
-            "com.miui.dock.allapps.g0\$d",
-            "com.miui.dock.allapps.g0\$c",
-            "com.miui.dock.allapps.g0\$e",
-        ).forEach { name ->
-            runCatching { Class.forName(name, false, loader) }.getOrNull()?.let { candidates.add(it) }
+        // 面板列表是在 g0 的内部类 invokeSuspend 里组装的（日志实测 g0$d.invokeSuspend:156
+        // 造「推荐应用」标题）。这些 Kotlin 协程状态机是**匿名/局部类**，不进
+        // g0.declaredClasses，按固定名字也常常取不到，所以把 g0$<字母> / g0$<数字>
+        // 全部穷举一遍，能加载的都纳入候选。
+        val suffixes = ArrayList<String>()
+        ('a'..'z').forEach { suffixes.add(it.toString()) }
+        (1..20).forEach { suffixes.add(it.toString()) }
+        suffixes.forEach { sfx ->
+            runCatching { Class.forName("com.miui.dock.allapps.g0\$" + sfx, false, loader) }
+                .getOrNull()?.let { candidates.add(it) }
         }
         runCatching {
             Class.forName("com.miui.dock.allapps.g0", false, loader).declaredClasses
@@ -1478,17 +1486,30 @@ object SidebarDockSlotHook : BaseHook() {
             HdDebug.log(TAG, "panel builder classes not found")
             return
         }
+        // 把 AllAppsRepository 也纳入：面板列表很可能是在它的某个方法里拼好
+        // （[推荐标题][推荐apps][小窗标题][小窗apps]）再交给 g0 的协程。
+        runCatching {
+            freeformFilterClass?.let { candidates.add(it) }
+        }
         var hooked = 0
         candidates.distinct().forEach { cls ->
             cls.declaredMethods
-                .filter { it.parameterCount == 1 && it.returnType == Any::class.java }
+                .filter { m ->
+                    m.parameterCount <= 1 &&
+                        (m.returnType == Any::class.java || List::class.java.isAssignableFrom(m.returnType))
+                }
                 .forEach { method ->
                     method.isAccessible = true
                     runCatching {
                         module.hook(method).intercept { chain ->
                             val result = chain.proceed()
                             val list = result as? List<Any> ?: return@intercept result
-                            filterRecommendGroup(module, list)
+                            // 只有确实带「推荐应用」标题的列表才动，其它原样返回。
+                            if (list.any { isPanelTitle(it) && titleResId(it) == 2131886858 }) {
+                                filterRecommendGroup(module, list)
+                            } else {
+                                result
+                            }
                         }
                         hooked++
                     }
