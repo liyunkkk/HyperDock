@@ -15,6 +15,14 @@ internal object HdDebug {
 
     private const val FILE_NAME = "hyperdock-debug.log"
     private const val MAX_BYTES = 64 * 1024
+    private const val MAX_PENDING = 500
+
+    /**
+     * 初始化阶段（Application 还没 attach、拿不到 Context）的日志先存内存，
+     * 等 Context 到位后一次性补写。否则整条初始化链的诊断全被吞掉——
+     * 上一版就是这样：模块里每个 hook 的"已调用/失败"一行都没留下来。
+     */
+    private val pending = ArrayDeque<String>()
 
     @Volatile private var file: File? = null
     @Volatile private var failed = false
@@ -45,10 +53,21 @@ internal object HdDebug {
 
     fun log(tag: String, message: String) {
         if (failed) return
-        val target = resolve() ?: return
+        val line = "${System.currentTimeMillis()} [$tag] $message\n"
+        val target = resolve()
+        if (target == null) {
+            synchronized(pending) {
+                pending.addLast(line)
+                while (pending.size > MAX_PENDING) pending.removeFirst()
+            }
+            return
+        }
         runCatching {
             if (target.length() > MAX_BYTES) target.delete()
-            target.appendText("${System.currentTimeMillis()} [$tag] $message\n")
+            synchronized(pending) {
+                while (pending.isNotEmpty()) target.appendText(pending.removeFirst())
+            }
+            target.appendText(line)
         }.onFailure { failed = true }
     }
 
