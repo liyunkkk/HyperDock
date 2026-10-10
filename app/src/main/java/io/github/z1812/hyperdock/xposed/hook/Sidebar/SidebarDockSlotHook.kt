@@ -218,48 +218,40 @@ object SidebarDockSlotHook : BaseHook() {
      */
     private fun muteChangeAnimation(module: XposedModule, view: View) {
         if (changeAnimationMuted) return
-        // 用户要图标滑出时直接落位、没有「从两边汇聚」的位移动画。最彻底的办法是
-        // 直接把 RecyclerView 的 ItemAnimator 摘掉（setItemAnimator(null)），
-        // 这样 move/add/remove/change 全部不做动画。之前先读 getItemAnimator，
-        // 拿到 null 就 return，导致什么都没做 —— 这里反过来，优先摘除。
-        val animatorSetter = view.javaClass.methods.firstOrNull {
-            it.name == "setItemAnimator" && it.parameterCount == 1
-        }
-        if (animatorSetter != null) {
-            val removed = runCatching {
-                animatorSetter.isAccessible = true
-                animatorSetter.invoke(view, null)
-            }.isSuccess
-            if (removed) {
-                changeAnimationMuted = true
-                log(module, "item animator removed on dock list (no move anim)")
-                return
+        var done = ""
+        // 1) ItemAnimator：处理列表内 add/move/remove/change 动画。直接摘掉。
+        runCatching {
+            val setter = view.javaClass.methods.firstOrNull {
+                it.name == "setItemAnimator" && it.parameterCount == 1
+            }
+            if (setter != null) {
+                setter.isAccessible = true
+                setter.invoke(view, null)
+                done += "itemAnimator "
             }
         }
-        // 兜底：摘不掉就把四类时长全部置 0。
-        val animator = runCatching {
-            val getter = view.javaClass.getMethod("getItemAnimator")
-            getter.isAccessible = true
-            getter.invoke(view)
-        }.getOrNull()
-        if (animator == null) {
-            logWarn(module, "cannot mute: itemAnimator null and setter unavailable")
-            return
-        }
-        var zeroed = 0
-        listOf("setChangeDuration", "setMoveDuration", "setAddDuration", "setRemoveDuration").forEach { name ->
-            runCatching {
-                val m = animator.javaClass.getMethod(name, Long::class.javaPrimitiveType)
-                m.isAccessible = true
-                m.invoke(animator, 0L)
-                zeroed++
+        // 2) layoutAnimation：容器变可见时对子 view 逐个播放的进入动画
+        //    —— 「图标从两边往中间汇聚」就是它。置空 + 关闭 animateLayoutChanges。
+        runCatching {
+            val vg = view as? android.view.ViewGroup
+            if (vg != null) {
+                vg.layoutAnimation = null
+                vg.layoutTransition = null
+                done += "layoutAnim "
             }
         }
-        if (zeroed > 0) {
+        // 3) 父容器（TurboLayout 等）上的 LayoutTransition 也会让子项位移，一并关掉。
+        runCatching {
+            (view.parent as? android.view.ViewGroup)?.let {
+                it.layoutTransition = null
+                done += "parentTransition "
+            }
+        }
+        if (done.isNotEmpty()) {
             changeAnimationMuted = true
-            log(module, "item animations muted on dock list (zeroed=$zeroed)")
+            HdDebug.log(TAG, "anim muted: " + done)
         } else {
-            logWarn(module, "cannot mute item animation on dock list")
+            HdDebug.log(TAG, "anim mute: nothing applied")
         }
     }
     private fun claim(module: XposedModule, view: View, adapter: Any) {
