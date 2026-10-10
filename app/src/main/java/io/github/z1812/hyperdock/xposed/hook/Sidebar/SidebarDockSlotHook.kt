@@ -89,6 +89,9 @@ object SidebarDockSlotHook : BaseHook() {
     /** 判定过"不是侧边栏列表"的 adapter 类，避免每次都打一条 warn。 */
     private val rejectedClasses = Collections.newSetFromMap(WeakHashMap<String, Boolean>())
 
+    /** 应用行的原始行高（按视图类记）：自造分割线会临时改行高，应用行必须能还原。 */
+    private val originalRowHeight = Collections.synchronizedMap(WeakHashMap<Class<*>, Int>())
+
     override fun getTag() = TAG
 
     override fun onInit(module: XposedModule, param: PackageLoadedParam) {
@@ -715,6 +718,14 @@ object SidebarDockSlotHook : BaseHook() {
         // 普通应用行：占位图必须 GONE —— INVISIBLE 仍然占位，会把格子顶歪（实测日志里
         // 常用应用行是 phVis=4，也就是"占着位置的空白"），同时保证图标可见、分割线隐藏。
         runCatching {
+            // 复用回来的视图可能带着分割线那次的矮行高，还原成应用行原本的高度
+            originalRowHeight[itemView.javaClass]?.let { h ->
+                val lp = itemView.layoutParams
+                if (lp != null && lp.height != h) {
+                    lp.height = h
+                    itemView.layoutParams = lp
+                }
+            }
             itemView.findViewById<View>(placeholderResId)?.visibility = View.GONE
             if (dividerResId != 0) itemView.findViewById<View>(dividerResId)?.visibility = View.GONE
             (itemView.findViewById<View>(iconResId) as? ImageView)?.visibility = View.VISIBLE
@@ -1110,7 +1121,22 @@ object SidebarDockSlotHook : BaseHook() {
         resolveResources(context)
         val divider = if (dividerResId != 0) itemView.findViewById<View>(dividerResId) else null
         if (divider == null) {
+            // 新宿主没有分割线条目类，这条是自造条目，复用的却是**应用行布局**（整行高），
+            // 于是留下一个整行高的空位 —— 就是用户看到的"空格占位"。
+            // 把行高收成一条线的高度，并记下原始行高给应用行还原。
+            itemView.visibility = View.VISIBLE
+            val density = itemView.resources.displayMetrics.density
+            val rowHeight = (lineHeight(itemView) * 3).coerceAtLeast((14 * density).toInt())
+            val lp = itemView.layoutParams
+            if (lp != null) {
+                if (originalRowHeight[itemView.javaClass] == null) {
+                    originalRowHeight[itemView.javaClass] = lp.height
+                }
+                lp.height = rowHeight
+                itemView.layoutParams = lp
+            }
             itemView.foreground = LiquidGlassLineDrawable(lineHeight(itemView))
+            HdDebug.log(TAG, "divider proxy line drawn h=" + rowHeight)
             return
         }
         divider.visibility = View.VISIBLE
