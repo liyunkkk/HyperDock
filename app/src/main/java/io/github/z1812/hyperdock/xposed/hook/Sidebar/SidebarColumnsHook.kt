@@ -94,6 +94,10 @@ object SidebarColumnsHook : BaseHook() {
     private val nativeListHeights = Collections.synchronizedMap(WeakHashMap<View, Int>())
     /** 每个侧边栏列表当前生效的列数（宿主侧 getSpanCount 已被裁剪，只能自己记账）。 */
     private val appliedColumns = Collections.synchronizedMap(WeakHashMap<View, Int>())
+    /** 每个侧边栏 RecyclerView 原生 LayoutManager 的首次实例；两列改单列时原样恢复。 */
+    private val originalLayoutManagers = Collections.synchronizedMap(WeakHashMap<View, Any>())
+    /** 只在当前一次侧边栏打开周期内把原生 LM 临时改成网格，关闭时还原。 */
+    private val activeGrid = Collections.synchronizedMap(WeakHashMap<View, Any>())
     /** 已知的 DockLayout 实例，配置变化时用来重放。 */
     private val appliedDocks = Collections.newSetFromMap(WeakHashMap<View, Boolean>())
 
@@ -565,15 +569,38 @@ object SidebarColumnsHook : BaseHook() {
     }
 
     private fun applyColumnCount(module: XposedModule, recycler: View, columns: Int) {
+        val rawCurrent = runCatching { getLayoutManagerMethod?.invoke(recycler) }.getOrNull() ?: return
+        // 保留宿主原始 LinearLayoutManager 实例：它含有自己的状态与动画策略。
+        // 若我们曾切到网格，单列/关闭时还原这个原始实例，避免每次滑出都创建新 LM、
+        // 触发全列表 remove/add/move 动画（表现成图标两边汇聚）。
+        if (originalLayoutManagers[recycler] == null &&
+            gridClass?.isInstance(rawCurrent) != true
+        ) originalLayoutManagers[recycler] = rawCurrent
+
         val tracked = appliedColumns[recycler]
-        if (tracked == columns) return
-        // 从没动过又要回到单列：保持原生 LinearLayoutManager，不做无谓替换。
-        if (tracked == null && columns == 1) return
-        val next = if (columns > 1) {
-            buildGrid(recycler.context, columns)
-        } else {
-            buildLinear(recycler.context) ?: buildGrid(recycler.context, 1)
+        if (tracked == columns && (columns > 1 || activeGrid[recycler] == null)) return
+        if (columns <= 1) {
+            val original = originalLayoutManagers[recycler]
+            val currentIsOurGrid = activeGrid[recycler] != null && rawCurrent === activeGrid[recycler]
+            if (!currentIsOurGrid) {
+                appliedColumns[recycler] = 1
+                return
+            }
+            if (original == null) return
+            runCatching {
+                selfSetting.set(true)
+                setLayoutManagerMethod?.invoke(recycler, original)
+            }.onFailure { logWarn(module, "restore original layout manager failed: ${it.message}") }
+                .onSuccess {
+                    selfSetting.set(false)
+                    activeGrid.remove(recycler)
+                    appliedColumns[recycler] = 1
+                    log(module, "restored original LayoutManager (no new instance)")
+                }
+            selfSetting.set(false)
+            return
         }
+        val next = buildGrid(recycler.context, columns)
         if (next == null) {
             logWarn(module, "layout manager build failed for columns=$columns")
             return
@@ -591,7 +618,10 @@ object SidebarColumnsHook : BaseHook() {
         selfSetting.set(false)
         if (ok) {
             appliedColumns[recycler] = columns
-            if (gridClass?.isInstance(next) == true) installSpanLookup(module, next, columns)
+            if (gridClass?.isInstance(next) == true) {
+                activeGrid[recycler] = next
+                installSpanLookup(module, next, columns)
+            }
             val current = runCatching { getLayoutManagerMethod?.invoke(recycler)?.javaClass?.name }.getOrNull()
             log(module, "columns=$columns applied via re-apply; lm=$current")
         }

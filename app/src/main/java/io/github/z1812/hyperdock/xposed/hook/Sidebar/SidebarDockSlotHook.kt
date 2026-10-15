@@ -84,7 +84,9 @@ object SidebarDockSlotHook : BaseHook() {
     @Volatile private var cachedIcon: Drawable? = null
 
     /** change 动画是否已经关掉（每个列表只需要一次）。 */
-    @Volatile private var changeAnimationMuted = false
+    private val mutedRecyclerViews = Collections.synchronizedSet(
+        Collections.newSetFromMap(WeakHashMap<View, Boolean>()),
+    )
 
     /** 判定过"不是侧边栏列表"的 adapter 类，避免每次都打一条 warn。 */
     private val rejectedClasses = Collections.newSetFromMap(WeakHashMap<String, Boolean>())
@@ -217,45 +219,73 @@ object SidebarDockSlotHook : BaseHook() {
      * 移动 / 新增 / 移除动画保留，不影响原生那些动效。
      */
     private fun muteChangeAnimation(module: XposedModule, view: View) {
-        if (changeAnimationMuted) return
-        var done = ""
-        // 1) ItemAnimator：处理列表内 add/move/remove/change 动画。直接摘掉。
+        // 每个具体 RecyclerView 都要抑制；不能用全局一次性 bool，因为宿主每次滑出
+        // 都可能新建 FadingEdgeRecyclerView，新实例会带着默认动画器 —— 表现就是
+        // 「滑几次之后图标又开始从两边汇聚」。每次接管/attach/滑出都重申一次。
+        val firstMute = mutedRecyclerViews.add(view)
+        val done = ArrayList<String>()
         runCatching {
             val setter = view.javaClass.methods.firstOrNull {
                 it.name == "setItemAnimator" && it.parameterCount == 1
             }
-            if (setter != null) {
-                setter.isAccessible = true
-                setter.invoke(view, null)
-                done += "itemAnimator "
-            }
+            // 注意：Kotlin 里 invoke(view, null) 可能把 null 当成整个 vararg 数组，
+            // 必须显式传一个 [null] 元素，否则反射调用会以 IllegalArgumentException 失败。
+            val nullArg = arrayOfNulls<Any?>(1)
+            if (setter != null && runCatching { setter.invoke(view, *nullArg) }.isSuccess) done.add("itemAnimator")
         }
-        // 2) layoutAnimation：容器变可见时对子 view 逐个播放的进入动画
-        //    —— 「图标从两边往中间汇聚」就是它。置空 + 关闭 animateLayoutChanges。
         runCatching {
             val vg = view as? android.view.ViewGroup
             if (vg != null) {
                 vg.layoutAnimation = null
                 vg.layoutTransition = null
-                done += "layoutAnim "
+                done.add("layoutAnimation/layoutTransition")
             }
         }
-        // 3) 父容器（TurboLayout 等）上的 LayoutTransition 也会让子项位移，一并关掉。
         runCatching {
-            (view.parent as? android.view.ViewGroup)?.let {
-                it.layoutTransition = null
-                done += "parentTransition "
+            (view.parent as? android.view.ViewGroup)?.let { parent ->
+                parent.layoutTransition = null
+                parent.layoutAnimation = null
+                done.add("parentTransition/layoutAnimation")
             }
         }
-        if (done.isNotEmpty()) {
-            changeAnimationMuted = true
-            HdDebug.log(TAG, "anim muted: " + done)
-        } else {
-            HdDebug.log(TAG, "anim mute: nothing applied")
+        // 记录这棵侧边栏容器树，等宿主后续 attach / setAdapter / 布局时再次递归关闭。
+        dockAnimationRoots.add(view)
+        if (firstMute || done.isEmpty()) {
+            HdDebug.log(
+                TAG,
+                "anim mute target=" + view.javaClass.simpleName + " first=" + firstMute +
+                    " disabled=" + (if (done.isEmpty()) "none" else done.joinToString()),
+            )
         }
     }
+
+    private val dockAnimationRoots = Collections.synchronizedSet(
+        Collections.newSetFromMap(WeakHashMap<View, Boolean>()),
+    )
+
+    /** 对侧边栏及其子树禁用容器进入动画；重建层级时由 attach/setAdapter 再跑。 */
+    private fun muteAnimationTree(root: View) {
+        fun visit(view: View, depth: Int) {
+            if (depth > 10) return
+            runCatching {
+                view.animate().cancel()
+                view.clearAnimation()
+                if (view is android.view.ViewGroup) {
+                    view.layoutAnimation = null
+                    view.layoutTransition = null
+                    for (i in 0 until view.childCount) visit(view.getChildAt(i), depth + 1)
+                }
+            }
+        }
+        visit(root, 0)
+    }
     private fun claim(module: XposedModule, view: View, adapter: Any) {
-        if (adapterInstance === adapter) return
+        if (adapterInstance === adapter) {
+            muteChangeAnimation(module, view)
+            muteAnimationTree(view)
+            view.post { muteAnimationTree(view) }
+            return
+        }
         if (!isDockRecycler(view)) return
         if (!prepareAdapter(module, adapter)) return
         adapterInstance = adapter
@@ -263,7 +293,11 @@ object SidebarDockSlotHook : BaseHook() {
         // 提前把图标读出来 warm 住，避免第一次绑定时 PackageManager 取图造成延迟。
         preloadIcon(view.context)
         muteChangeAnimation(module, view)
-        view.post { muteChangeAnimation(module, view) }
+        muteAnimationTree(view)
+        view.post {
+            muteChangeAnimation(module, view)
+            muteAnimationTree(view)
+        }
         log(module, "dock list claimed: ${adapter.javaClass.name}")
     }
 
@@ -374,6 +408,14 @@ object SidebarDockSlotHook : BaseHook() {
                 )
                 runCatching {
                     SidebarColumnsHook.reassertSpanLookup(dockGridView())
+                }
+                // 每次滑出都会走到这里（列表提交）。宿主可能在这条路径上重新装回
+                // 动画器/容器进入动画，只在 attach 时静音会漏掉 —— 这里重申一次。
+                runCatching {
+                    dockGridView()?.let { grid ->
+                        muteChangeAnimation(module, grid)
+                        muteAnimationTree(grid)
+                    }
                 }
                 dumpGrid(module)
                 lastInjected = injected
