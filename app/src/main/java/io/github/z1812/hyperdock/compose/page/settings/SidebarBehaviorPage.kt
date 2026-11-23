@@ -11,6 +11,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -76,6 +77,7 @@ internal fun SidebarBehaviorPage(
     }
     val expandAllApps = rememberBooleanPreference(prefs, PrefKeys.SIDEBAR_EXPAND_ALL_APPS, false)
     val twoColumns = rememberBooleanPreference(prefs, PrefKeys.SIDEBAR_TWO_COLUMNS, false)
+    val transferDockButton = rememberBooleanPreference(prefs, PrefKeys.SIDEBAR_TRANSFER_DOCK_BUTTON, true)
     val panelCache = rememberBooleanPreference(prefs, PrefKeys.SIDEBAR_PANEL_CACHE, false)
     val staggeredExpand = rememberBooleanPreference(prefs, PrefKeys.SIDEBAR_STAGGERED_EXPAND, false)
     val shortcutsEnabled = rememberBooleanPreference(prefs, PrefKeys.SHORTCUTS_ENABLED, false)
@@ -178,11 +180,22 @@ internal fun SidebarBehaviorPage(
                         shrinkTowards = Alignment.Top,
                     ) + fadeOut(tween(140)),
                 ) {
-                    SettingsActionWithArrow(
-                        title = stringResource(R.string.sidebar_quick_slot),
-                        summary = stringResource(R.string.sidebar_quick_slot_current, quickSlotLabel.value),
-                        onClick = onOpenQuickSlot,
-                    )
+                    Column {
+                        PreferenceSwitch(
+                            title = stringResource(R.string.sidebar_transfer_dock_button),
+                            summary = stringResource(R.string.sidebar_transfer_dock_button_summary),
+                            icon = null,
+                            checked = transferDockButton.value,
+                        ) {
+                            transferDockButton.value = it
+                            prefs.putBoolean(PrefKeys.SIDEBAR_TRANSFER_DOCK_BUTTON, it)
+                        }
+                        SettingsActionWithArrow(
+                            title = stringResource(R.string.sidebar_quick_slot),
+                            summary = stringResource(R.string.sidebar_quick_slot_current, quickSlotLabel.value),
+                            onClick = onOpenQuickSlot,
+                        )
+                    }
                 }
                 PreferenceSwitch(
                     stringResource(R.string.sidebar_expand_all_apps),

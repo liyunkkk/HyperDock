@@ -448,8 +448,12 @@ object SidebarColumnsHook : BaseHook() {
         val columns = desiredColumns()
         applyColumnCount(module, recycler, columns)
         applyPanelSize(module, view, recycler, columns)
+        SidebarTransferDockButton.apply(view, recycler, columns)
         if (converge) {
-            view.postDelayed({ applyPanelSize(module, view, recycler, columns) }, CONVERGE_DELAY_MS)
+            view.postDelayed({
+                applyPanelSize(module, view, recycler, columns)
+                SidebarTransferDockButton.apply(view, recycler, columns)
+            }, CONVERGE_DELAY_MS)
         }
     }
 

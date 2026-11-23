@@ -27,6 +27,8 @@ object PrefKeys {
     const val SIDEBAR_STAGGERED_EXPAND = "sidebar_staggered_expand"
     /** 侧边栏两列。与 [SIDEBAR_EXPAND_ALL_APPS] 互斥，见 SidebarBehaviorPage。 */
     const val SIDEBAR_TWO_COLUMNS = "sidebar_two_columns"
+    /** 两列模式下在底部「全部应用」按钮右侧并排显示 HyperPortal 中转站入口按钮。 */
+    const val SIDEBAR_TRANSFER_DOCK_BUTTON = "sidebar_transfer_dock_button"
     /**
      * 两列模式下「速记」旁边那一格放什么。值为条目 id：
      * `app:<包名>` / 快速启动 id（`activity:...`） / 内置快捷方式 id（目录 id 或 `pkg/cls`）。
@@ -148,6 +150,7 @@ object PrefKeys {
         SIDEBAR_PANEL_CACHE,
         SIDEBAR_STAGGERED_EXPAND,
         SIDEBAR_TWO_COLUMNS,
+        SIDEBAR_TRANSFER_DOCK_BUTTON,
         SIDEBAR_QUICK_SLOT,
         SIDEBAR_AUTO_CLOSE_MODE,
         SIDEBAR_HANDLE_IDLE_HIDE,
@@ -175,6 +178,7 @@ object PrefKeys {
         SIDEBAR_PANEL_CACHE,
         SIDEBAR_STAGGERED_EXPAND,
         SIDEBAR_TWO_COLUMNS,
+        SIDEBAR_TRANSFER_DOCK_BUTTON,
         SIDEBAR_QUICK_SLOT,
         SIDEBAR_AUTO_CLOSE_MODE,
         SIDEBAR_HANDLE_IDLE_HIDE,
