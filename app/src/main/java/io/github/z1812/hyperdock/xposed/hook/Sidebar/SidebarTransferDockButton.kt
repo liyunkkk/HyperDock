@@ -48,7 +48,7 @@ internal object SidebarTransferDockButton {
 
     private const val ACTION_OPEN_TRANSFER_DOCK = "com.github.leaf.hyperportal.OPEN_TRANSFER_DOCK"
     private const val SYSTEMUI_PACKAGE = "com.android.systemui"
-    private const val LAUNCH_DELAY_MS = 80L
+    private const val LAUNCH_DELAY_MS = 45L
 
     private const val FALLBACK_ITEM_EDGE_DP = 48f
     private const val FALLBACK_ITEM_PADDING_DP = 12f
@@ -148,7 +148,7 @@ internal object SidebarTransferDockButton {
             rowLp.marginEnd = 0
         }
 
-        val transferBtn = createTransferDockButton(context, btnW, btnH)
+        val transferBtn = createTransferDockButton(context, dock, btnW, btnH)
 
         parent.removeViewAt(index)
         row.addView(
@@ -254,7 +254,13 @@ internal object SidebarTransferDockButton {
     }
 
     @SuppressLint("ClickableViewAccessibility")
-    private fun createTransferDockButton(context: Context, widthPx: Int, heightPx: Int): ImageView {
+    private fun createTransferDockButton(
+        context: Context,
+        dock: View,
+        widthPx: Int,
+        heightPx: Int,
+    ): ImageView {
+        val dockRef = java.lang.ref.WeakReference(dock)
         return ImageView(context).apply {
             tag = TRANSFER_BTN_TAG
             contentDescription = "HyperPortal 中转站"
@@ -274,17 +280,36 @@ internal object SidebarTransferDockButton {
                 false
             }
             setOnClickListener {
-                openHyperPortalTransferDock(context)
+                openHyperPortalTransferDock(context, dockRef.get())
             }
         }
     }
 
-    private fun openHyperPortalTransferDock(context: Context) {
-        val closed = SidebarCloseHook.closeSidebar()
-        val appContext = context.applicationContext ?: context
+    private fun openHyperPortalTransferDock(context: Context, dock: View?) {
         val intent = Intent(ACTION_OPEN_TRANSFER_DOCK).apply {
             setPackage(SYSTEMUI_PACKAGE)
         }
+        // 在收起侧边栏之前先读取当前 Dock 面板在屏幕上的真实位置与尺寸，
+        // 传给 HyperPortal 让中转站面板原地精准对齐。
+        if (dock != null && dock.width > 0 && dock.height > 0) {
+            val loc = IntArray(2)
+            dock.getLocationOnScreen(loc)
+            intent.putExtra("dock_left", loc[0])
+            intent.putExtra("dock_top", loc[1])
+            intent.putExtra("dock_width", dock.width)
+            intent.putExtra("dock_height", dock.height)
+            val cornerPx = optionalDimensionPx(context, "dock_corner_radius")
+                ?: optionalDimensionPx(context, "dock_panel_radius")
+            if (cornerPx != null && cornerPx > 0) {
+                intent.putExtra("dock_corner_radius", cornerPx)
+            }
+            HdDebug.log(
+                "TransferDock",
+                "anchor bounds=(${loc[0]},${loc[1]},${dock.width}x${dock.height}) corner=${cornerPx ?: 0}",
+            )
+        }
+        val closed = SidebarCloseHook.closeSidebar()
+        val appContext = context.applicationContext ?: context
         HdDebug.log("TransferDock", "click -> closeSidebar=$closed, broadcasting $ACTION_OPEN_TRANSFER_DOCK")
         mainHandler.postDelayed({
             runCatching {
@@ -293,6 +318,13 @@ internal object SidebarTransferDockButton {
                 Log.w(TAG, "send OPEN_TRANSFER_DOCK broadcast failed: ${it.message}")
             }
         }, LAUNCH_DELAY_MS)
+    }
+
+    private fun optionalDimensionPx(context: Context, name: String): Int? {
+        val resources = context.resources ?: return null
+        val id = runCatching { resources.getIdentifier(name, "dimen", context.packageName) }.getOrDefault(0)
+        if (id == 0) return null
+        return runCatching { resources.getDimensionPixelSize(id) }.getOrNull()?.takeIf { it > 0 }
     }
 
     private fun dimensionPx(context: Context, name: String, fallbackDp: Float): Int {
