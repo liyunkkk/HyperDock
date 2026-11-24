@@ -149,6 +149,7 @@ internal object SidebarTransferDockButton {
         }
 
         val transferBtn = createTransferDockButton(context, dock, btnW, btnH)
+        styleAllAppsButton(allAppsView, context.resources.displayMetrics.density, btnW, btnH)
 
         parent.removeViewAt(index)
         row.addView(
@@ -175,6 +176,9 @@ internal object SidebarTransferDockButton {
     }
 
     private fun updateLayout(holder: FooterHolder, shouldShow: Boolean) {
+        val density = holder.allAppsView.resources?.displayMetrics?.density ?: 3f
+        styleAllAppsButton(holder.allAppsView, density, holder.buttonWidthPx, holder.buttonHeightPx)
+
         val targetVis = if (shouldShow) View.VISIBLE else View.GONE
         if (holder.transferButton.visibility != targetVis) {
             holder.transferButton.visibility = targetVis
@@ -186,6 +190,56 @@ internal object SidebarTransferDockButton {
             allAppsLp.rightMargin = targetMargin
             holder.allAppsView.layoutParams = allAppsLp
         }
+    }
+
+    /**
+     * 将原生「全部应用」按钮的图标重构为与中转站一致的液态磨砂玻璃圆角方块 + 细线 2×2 方格图标。
+     */
+    private fun styleAllAppsButton(allAppsView: View, density: Float, widthPx: Int, heightPx: Int) {
+        val imageView = findFirstImageView(allAppsView) ?: return
+        if (allAppsView is ViewGroup && allAppsView !== imageView) {
+            if (allAppsView.background != null) {
+                allAppsView.background = null
+            }
+            if (allAppsView.paddingLeft != 0 || allAppsView.paddingTop != 0 ||
+                allAppsView.paddingRight != 0 || allAppsView.paddingBottom != 0
+            ) {
+                allAppsView.setPadding(0, 0, 0, 0)
+            }
+            val lp = imageView.layoutParams
+            if (lp != null && (lp.width != ViewGroup.LayoutParams.MATCH_PARENT || lp.height != ViewGroup.LayoutParams.MATCH_PARENT)) {
+                lp.width = ViewGroup.LayoutParams.MATCH_PARENT
+                lp.height = ViewGroup.LayoutParams.MATCH_PARENT
+                imageView.layoutParams = lp
+            }
+        }
+        if (imageView.background != null) {
+            imageView.background = null
+        }
+        if (imageView.paddingLeft != 0 || imageView.paddingTop != 0 ||
+            imageView.paddingRight != 0 || imageView.paddingBottom != 0
+        ) {
+            imageView.setPadding(0, 0, 0, 0)
+        }
+        if (imageView.imageTintList != null) {
+            imageView.imageTintList = null
+        }
+        if (imageView.scaleType != ImageView.ScaleType.FIT_CENTER) {
+            imageView.scaleType = ImageView.ScaleType.FIT_CENTER
+        }
+        if (imageView.drawable !is AllAppsIconDrawable) {
+            imageView.setImageDrawable(AllAppsIconDrawable(density, widthPx, heightPx))
+        }
+    }
+
+    private fun findFirstImageView(view: View, depth: Int = 0): ImageView? {
+        if (view is ImageView) return view
+        if (view !is ViewGroup || depth > 4) return null
+        for (i in 0 until view.childCount) {
+            val hit = findFirstImageView(view.getChildAt(i) ?: continue, depth + 1)
+            if (hit != null) return hit
+        }
+        return null
     }
 
     /**
@@ -337,10 +391,11 @@ internal object SidebarTransferDockButton {
     }
 
     /**
-     * 风格与原生底部四宫格按钮一致的磨砂玻璃圆角方块 + HyperPortal 中转站文件夹双箭头图标。
+     * 底部功能图标统一磨砂玻璃底座（圆角方块 + 竖向微光渐变 + 亮白细描边），
+     * 供「全部应用」与「HyperPortal 中转站」共用，保证两枚按钮视觉完全统一。
      */
-    private class TransferDockIconDrawable(
-        private val density: Float,
+    private abstract class GlassDockIconDrawable(
+        protected val density: Float,
         private val widthPx: Int,
         private val heightPx: Int,
     ) : Drawable() {
@@ -353,19 +408,37 @@ internal object SidebarTransferDockButton {
             color = Color.argb(95, 255, 255, 255)
             strokeWidth = (0.75f * density).coerceAtLeast(1f)
         }
-        private val glyphPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        protected val glyphPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
             color = Color.argb(242, 255, 255, 255)
             strokeCap = Paint.Cap.ROUND
             strokeJoin = Paint.Join.ROUND
         }
         private val rect = RectF()
-        private val folderPath = Path()
         private var lastBoundsH = -1
+        private var lastSelected = false
+        private var isSelectedState = false
 
         override fun getIntrinsicWidth(): Int = widthPx
 
         override fun getIntrinsicHeight(): Int = heightPx
+
+        override fun isStateful(): Boolean = true
+
+        override fun onStateChange(state: IntArray): Boolean {
+            val selectedNow = state.contains(android.R.attr.state_selected)
+            if (selectedNow != isSelectedState) {
+                isSelectedState = selectedNow
+                borderPaint.color = if (selectedNow) {
+                    Color.argb(145, 255, 255, 255)
+                } else {
+                    Color.argb(95, 255, 255, 255)
+                }
+                invalidateSelf()
+                return true
+            }
+            return false
+        }
 
         override fun draw(canvas: Canvas) {
             val b = bounds
@@ -379,15 +452,16 @@ internal object SidebarTransferDockButton {
             val inset = borderPaint.strokeWidth * 0.5f
             rect.set(left + inset, top + inset, left + size - inset, top + size - inset)
 
-            if (lastBoundsH != b.height()) {
+            if (lastBoundsH != b.height() || lastSelected != isSelectedState) {
                 lastBoundsH = b.height()
+                lastSelected = isSelectedState
                 bgPaint.shader = LinearGradient(
                     left,
                     top,
                     left,
                     top + size,
-                    Color.argb(92, 255, 255, 255),
-                    Color.argb(58, 224, 236, 255),
+                    if (isSelectedState) Color.argb(128, 255, 255, 255) else Color.argb(92, 255, 255, 255),
+                    if (isSelectedState) Color.argb(86, 224, 236, 255) else Color.argb(58, 224, 236, 255),
                     Shader.TileMode.CLAMP,
                 )
             }
@@ -396,11 +470,77 @@ internal object SidebarTransferDockButton {
             canvas.drawRoundRect(rect, radius, radius, bgPaint)
             canvas.drawRoundRect(rect, radius, radius, borderPaint)
 
-            // 绘制中转站文件夹 + 双向传输箭头（比例与 HyperPortal BuiltInIconDrawable 一致）
             val cx = left + size * 0.5f
             val cy = top + size * 0.5f
             glyphPaint.strokeWidth = (size * 0.052f).coerceAtLeast(1.6f * density)
+            drawGlyph(canvas, cx, cy, size)
+        }
 
+        protected abstract fun drawGlyph(canvas: Canvas, cx: Float, cy: Float, size: Float)
+
+        override fun setAlpha(alpha: Int) {
+            bgPaint.alpha = alpha
+            borderPaint.alpha = alpha
+            glyphPaint.alpha = alpha
+            invalidateSelf()
+        }
+
+        override fun setColorFilter(colorFilter: ColorFilter?) {
+            bgPaint.colorFilter = colorFilter
+            borderPaint.colorFilter = colorFilter
+            glyphPaint.colorFilter = colorFilter
+            invalidateSelf()
+        }
+
+        @Deprecated("Deprecated in Java")
+        override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
+    }
+
+    /**
+     * 与中转站图标视觉统一的「全部应用」2×2 细线圆角方格图标。
+     */
+    private class AllAppsIconDrawable(
+        density: Float,
+        widthPx: Int,
+        heightPx: Int,
+    ) : GlassDockIconDrawable(density, widthPx, heightPx) {
+
+        private val cellRect = RectF()
+
+        override fun drawGlyph(canvas: Canvas, cx: Float, cy: Float, size: Float) {
+            // 视觉外框与中转站文件夹（0.48 x 0.405）保持同等体量与留白
+            val gridSpan = size * 0.41f
+            val cellGap = size * 0.09f
+            val cellSize = (gridSpan - cellGap) * 0.5f
+            val cellRadius = cellSize * 0.28f
+            val startX = cx - gridSpan * 0.5f
+            val startY = cy - gridSpan * 0.5f
+            val step = cellSize + cellGap
+
+            for (row in 0..1) {
+                for (col in 0..1) {
+                    val x = startX + col * step
+                    val y = startY + row * step
+                    cellRect.set(x, y, x + cellSize, y + cellSize)
+                    canvas.drawRoundRect(cellRect, cellRadius, cellRadius, glyphPaint)
+                }
+            }
+        }
+    }
+
+    /**
+     * 风格与底部功能区一致的磨砂玻璃圆角方块 + HyperPortal 中转站文件夹双箭头图标。
+     */
+    private class TransferDockIconDrawable(
+        density: Float,
+        widthPx: Int,
+        heightPx: Int,
+    ) : GlassDockIconDrawable(density, widthPx, heightPx) {
+
+        private val folderPath = Path()
+
+        override fun drawGlyph(canvas: Canvas, cx: Float, cy: Float, size: Float) {
+            // 绘制中转站文件夹 + 双向传输箭头（比例与 HyperPortal BuiltInIconDrawable 一致）
             val fw = size * 0.48f
             val fh = size * 0.36f
             val fx = cx - fw * 0.5f
@@ -432,22 +572,5 @@ internal object SidebarTransferDockButton {
             canvas.drawLine(cx - size * 0.035f, arrowY2 - size * 0.04f, cx - size * 0.095f, arrowY2, glyphPaint)
             canvas.drawLine(cx - size * 0.035f, arrowY2 + size * 0.04f, cx - size * 0.095f, arrowY2, glyphPaint)
         }
-
-        override fun setAlpha(alpha: Int) {
-            bgPaint.alpha = alpha
-            borderPaint.alpha = alpha
-            glyphPaint.alpha = alpha
-            invalidateSelf()
-        }
-
-        override fun setColorFilter(colorFilter: ColorFilter?) {
-            bgPaint.colorFilter = colorFilter
-            borderPaint.colorFilter = colorFilter
-            glyphPaint.colorFilter = colorFilter
-            invalidateSelf()
-        }
-
-        @Deprecated("Deprecated in Java")
-        override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
     }
 }
