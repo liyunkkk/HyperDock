@@ -20,6 +20,7 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
+import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import io.github.z1812.hyperdock.PrefKeys
@@ -51,17 +52,19 @@ internal object SidebarTransferDockButton {
     private const val LAUNCH_DELAY_MS = 45L
 
     private const val FALLBACK_ITEM_EDGE_DP = 48f
-    private const val FALLBACK_ITEM_PADDING_DP = 12f
     private const val FOOTER_ROW_TAG = "hyperdock_transfer_dock_footer_row"
+    private const val ALL_APPS_SLOT_TAG = "hyperdock_all_apps_slot"
+    private const val TRANSFER_SLOT_TAG = "hyperdock_transfer_dock_slot"
     private const val TRANSFER_BTN_TAG = "hyperdock_transfer_dock_button"
 
     private class FooterHolder(
         val row: LinearLayout,
+        val allAppsSlot: FrameLayout,
+        val transferSlot: FrameLayout,
         val allAppsView: View,
         val transferButton: ImageView,
         val buttonWidthPx: Int,
         val buttonHeightPx: Int,
-        val gapPx: Int,
     )
 
     private val holders = Collections.synchronizedMap(WeakHashMap<View, FooterHolder>())
@@ -72,12 +75,14 @@ internal object SidebarTransferDockButton {
 
     fun apply(dock: View, recycler: View, columns: Int) {
         runCatching {
-            val holder = holders[dock]?.takeIf { it.row.parent != null && it.allAppsView.parent === it.row }
+            val holder = holders[dock]?.takeIf {
+                it.row.parent != null && it.allAppsView.parent === it.allAppsSlot
+            }
                 ?: installFooterRow(dock, recycler)?.also { holders[dock] = it }
                 ?: return
 
             val shouldShow = columns > 1 && isEnabled() && holder.allAppsView.visibility == View.VISIBLE
-            updateLayout(holder, shouldShow)
+            updateLayout(holder, recycler, shouldShow)
         }.onFailure {
             Log.w(TAG, "apply failed: ${it.message}")
             HdDebug.log("TransferDock", "apply failed: $it")
@@ -92,20 +97,19 @@ internal object SidebarTransferDockButton {
 
         // 若已被前一次安装包装过，直接复用，避免重复嵌套。
         if (allAppsView.tag == FOOTER_ROW_TAG && allAppsView is LinearLayout) {
-            val origBtn = allAppsView.getChildAt(0) ?: return null
-            val transferBtn = allAppsView.findViewWithTag<ImageView>(TRANSFER_BTN_TAG) ?: return null
+            val allAppsSlot = allAppsView.findViewWithTag<FrameLayout>(ALL_APPS_SLOT_TAG) ?: return null
+            val transferSlot = allAppsView.findViewWithTag<FrameLayout>(TRANSFER_SLOT_TAG) ?: return null
+            val origBtn = allAppsSlot.getChildAt(0) ?: return null
+            val transferBtn = transferSlot.findViewWithTag<ImageView>(TRANSFER_BTN_TAG) ?: return null
             val context = dock.context ?: return null
             val edgePx = dimensionPx(context, "dock_item_edge", FALLBACK_ITEM_EDGE_DP)
-            val paddingPx = dimensionPx(context, "dock_item_padding", FALLBACK_ITEM_PADDING_DP)
             val btnW = origBtn.layoutParams?.width?.takeIf { it > 0 } ?: edgePx
             val btnH = origBtn.layoutParams?.height?.takeIf { it > 0 } ?: edgePx
-            val gapPx = (edgePx + paddingPx - btnW).coerceAtLeast(paddingPx / 2)
-            return FooterHolder(allAppsView, origBtn, transferBtn, btnW, btnH, gapPx)
+            return FooterHolder(allAppsView, allAppsSlot, transferSlot, origBtn, transferBtn, btnW, btnH)
         }
 
         val context = dock.context ?: return null
         val edgePx = dimensionPx(context, "dock_item_edge", FALLBACK_ITEM_EDGE_DP)
-        val paddingPx = dimensionPx(context, "dock_item_padding", FALLBACK_ITEM_PADDING_DP)
 
         val origLp = allAppsView.layoutParams
         val origWidth = origLp?.width ?: 0
@@ -115,7 +119,6 @@ internal object SidebarTransferDockButton {
 
         val btnW = if (origWidth in minReasonable..maxReasonable) origWidth else edgePx
         val btnH = if (origHeight in minReasonable..maxReasonable) origHeight else btnW
-        val gapPx = (edgePx + paddingPx - btnW).coerceAtLeast(paddingPx / 2)
 
         val index = parent.indexOfChild(allAppsView)
         if (index < 0) return null
@@ -123,15 +126,17 @@ internal object SidebarTransferDockButton {
         val row = LinearLayout(context).apply {
             tag = FOOTER_ROW_TAG
             orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
+            gravity = Gravity.CENTER_VERTICAL
             clipChildren = false
             clipToPadding = false
         }
 
         // 外层若是全宽包装容器，把它的上下内边距移到 footerRow 上，避免缩窄到 btnW 时挤压内部图标。
         if (allAppsView is ViewGroup && (origWidth == ViewGroup.LayoutParams.MATCH_PARENT || origWidth > maxReasonable)) {
-            row.setPadding(0, allAppsView.paddingTop, 0, allAppsView.paddingBottom)
+            row.setPadding(recycler.paddingLeft, allAppsView.paddingTop, recycler.paddingRight, allAppsView.paddingBottom)
             allAppsView.setPadding(0, 0, 0, 0)
+        } else {
+            row.setPadding(recycler.paddingLeft, 0, recycler.paddingRight, 0)
         }
 
         // 复用原 LayoutParams 以保留 RelativeLayout / ConstraintLayout / FrameLayout 的定位规则与上下边距。
@@ -151,16 +156,37 @@ internal object SidebarTransferDockButton {
         val transferBtn = createTransferDockButton(context, dock, btnW, btnH)
         styleAllAppsButton(allAppsView, context.resources.displayMetrics.density, btnW, btnH)
 
+        // 与上方 GridLayoutManager(2) 一致：两个等宽 weight=1 格各自水平居中放置图标，
+        // 保证底部「全部应用」与「中转站」与上方两列应用图标像素级对齐。
+        val allAppsSlot = FrameLayout(context).apply {
+            tag = ALL_APPS_SLOT_TAG
+            clipChildren = false
+            clipToPadding = false
+        }
+        val transferSlot = FrameLayout(context).apply {
+            tag = TRANSFER_SLOT_TAG
+            clipChildren = false
+            clipToPadding = false
+        }
+
         parent.removeViewAt(index)
-        row.addView(
+        allAppsSlot.addView(
             allAppsView,
-            LinearLayout.LayoutParams(btnW, btnH).apply {
+            FrameLayout.LayoutParams(btnW, btnH, Gravity.CENTER),
+        )
+        transferSlot.addView(
+            transferBtn,
+            FrameLayout.LayoutParams(btnW, btnH, Gravity.CENTER),
+        )
+        row.addView(
+            allAppsSlot,
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
                 gravity = Gravity.CENTER_VERTICAL
             },
         )
         row.addView(
-            transferBtn,
-            LinearLayout.LayoutParams(btnW, btnH).apply {
+            transferSlot,
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
                 gravity = Gravity.CENTER_VERTICAL
             },
         )
@@ -170,25 +196,28 @@ internal object SidebarTransferDockButton {
             "TransferDock",
             "installed footer row in ${parent.javaClass.simpleName} at index=$index " +
                 "orig=${allAppsView.javaClass.simpleName}(${origWidth}x${origHeight}) " +
-                "btn=${btnW}x${btnH} gap=$gapPx",
+                "btn=${btnW}x${btnH} rPad=(${recycler.paddingLeft},${recycler.paddingRight})",
         )
-        return FooterHolder(row, allAppsView, transferBtn, btnW, btnH, gapPx)
+        return FooterHolder(row, allAppsSlot, transferSlot, allAppsView, transferBtn, btnW, btnH)
     }
 
-    private fun updateLayout(holder: FooterHolder, shouldShow: Boolean) {
+    private fun updateLayout(holder: FooterHolder, recycler: View, shouldShow: Boolean) {
         val density = holder.allAppsView.resources?.displayMetrics?.density ?: 3f
         styleAllAppsButton(holder.allAppsView, density, holder.buttonWidthPx, holder.buttonHeightPx)
 
+        // 同步 RecyclerView 左右内边距，确保两列中心线与上方应用网格完全重合。
+        val padL = recycler.paddingLeft
+        val padR = recycler.paddingRight
+        if (holder.row.paddingLeft != padL || holder.row.paddingRight != padR) {
+            holder.row.setPadding(padL, holder.row.paddingTop, padR, holder.row.paddingBottom)
+        }
+
         val targetVis = if (shouldShow) View.VISIBLE else View.GONE
+        if (holder.transferSlot.visibility != targetVis) {
+            holder.transferSlot.visibility = targetVis
+        }
         if (holder.transferButton.visibility != targetVis) {
             holder.transferButton.visibility = targetVis
-        }
-        val allAppsLp = holder.allAppsView.layoutParams as? LinearLayout.LayoutParams
-        val targetMargin = if (shouldShow) holder.gapPx else 0
-        if (allAppsLp != null && (allAppsLp.marginEnd != targetMargin || allAppsLp.rightMargin != targetMargin)) {
-            allAppsLp.marginEnd = targetMargin
-            allAppsLp.rightMargin = targetMargin
-            holder.allAppsView.layoutParams = allAppsLp
         }
     }
 
@@ -508,9 +537,10 @@ internal object SidebarTransferDockButton {
         private val cellRect = RectF()
 
         override fun drawGlyph(canvas: Canvas, cx: Float, cy: Float, size: Float) {
-            // 视觉外框与中转站文件夹（0.48 x 0.405）保持同等体量与留白
-            val gridSpan = size * 0.41f
-            val cellGap = size * 0.09f
+            // 2×2 圆角方格收窄至约 38% 视觉占比，与右侧中转站图标留白和轻重感一致
+            glyphPaint.strokeWidth = (size * 0.044f).coerceAtLeast(1.4f * density)
+            val gridSpan = size * 0.34f
+            val cellGap = size * 0.075f
             val cellSize = (gridSpan - cellGap) * 0.5f
             val cellRadius = cellSize * 0.28f
             val startX = cx - gridSpan * 0.5f
